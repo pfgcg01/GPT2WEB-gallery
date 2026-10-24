@@ -32,6 +32,7 @@
       (!query || `${source.filename} ${source.batchLabel} ${source.relative} 第 ${source.round || ''} 輪`.toLocaleLowerCase().includes(query)));
   }
   function images() {
+    if(catalog?.paged)return catalog.images;
     const list = (catalog?.images || []).filter(image => (view === 'all' || image.status === view) && baseFilter(image));
     const sort = $('sort').value;
     return list.sort((a, b) => {
@@ -75,6 +76,7 @@
   }
   function renderScan(scan) {
     $('scan').disabled = scan.running || busy;
+    if(scan.cloud){$('scan').textContent='更新圖庫';$('scan-status').textContent='僅顯示已核對上傳的成果';return;}
     $('scan-status').textContent = scan.error ? '掃描未完成：' + scan.error : scan.running ? `正在收錄 · 已檢查 ${scan.seen} 個檔案` :
       scan.issues ? `${scan.issues} 個檔案暫未收錄，會在下次掃描重試` : '自動收錄已開啟';
   }
@@ -84,11 +86,13 @@
     for (const button of $('views').querySelectorAll('button')) { if (button.dataset.view === view) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }
     $('view-title').textContent = { pending: '先看看，慢慢挑。', favorite: '喜歡的，都留在這裡。', archived: '先收好，隨時再看。', all: '每一次生成，都在這裡。' }[view];
     $('view-description').textContent = { pending: '喜歡的留下，其他的先收好。點開圖片，就能用鍵盤快速篩選。', favorite: '把值得留下的圖片集中起來，隨時比較、匯出。', archived: '暫時不選的圖片，仍能放大查看或還原。', all: '依批次與輪次回顧作品，找出下一張喜歡的圖片。' }[view];
-    const optionKey = JSON.stringify([catalog.batches, [...new Set(catalog.images.flatMap(i => i.sources.map(s => s.round)).filter(Boolean))].sort((a,b)=>a-b)]);
+    const roundOptions=catalog.rounds||[...new Set(catalog.images.flatMap(i=>i.sources.map(s=>s.round)).filter(Boolean))].sort((a,b)=>a-b);
+    const optionKey = JSON.stringify([catalog.batches, roundOptions,catalog.devices,catalog.workspaces]);
     if (optionKey !== lastOptions) {
       lastOptions = optionKey; const batch = $('batch').value, round = $('round').value;
       $('batch').replaceChildren(new Option('所有批次', '')); for (const b of catalog.batches) $('batch').append(new Option(b.label, b.id));
-      $('round').replaceChildren(new Option('所有輪次', '')); for (const n of [...new Set(catalog.images.flatMap(i=>i.sources.map(s=>s.round)).filter(Boolean))].sort((a,b)=>a-b)) $('round').append(new Option('第 ' + n + ' 輪', String(n)));
+      $('round').replaceChildren(new Option('所有輪次', '')); for (const n of roundOptions) $('round').append(new Option('第 ' + n + ' 輪', String(n)));
+      for(const [id,values,label] of [['device',(catalog.devices||[]),'所有裝置'],['workspace',(catalog.workspaces||[]).map(w=>({id:w.name,label:w.name})),'所有工作區']])if($(id)){const chosen=$(id).value;$(id).replaceChildren(new Option(label,''),...values.map(v=>new Option(v.label,v.id)));$(id).value=values.some(v=>v.id===chosen)?chosen:'';}
       if (catalog.batches.some(b=>b.id===batch)) $('batch').value = batch; if ([...$('round').options].some(o=>o.value===round)) $('round').value = round;
     }
     const list = images(), shown = list.slice(0, page * 60), signature = JSON.stringify([shown.map(i=>[i.id,i.status,i.reviewVersion,i.sources]),busy,!!pendingOperation]);
@@ -100,24 +104,41 @@
         if(el!==cursor)$('grid').insertBefore(el,cursor);cursor=el.nextSibling;keep.add(el);}
       for(const el of [...$('grid').children])if(!keep.has(el))el.remove();
     }
-    $('result-count').textContent = `${labels[view]} ${list.length} 張${$('batch').value || $('round').value || $('search').value ? ' · 已套用篩選' : ''}`;
+    $('result-count').textContent = `${labels[view]} ${catalog.filteredCount??list.length} 張${catalog.paged?' · 已載入 '+list.length+' 張':''}${$('batch').value || $('round').value || $('search').value ? ' · 已套用篩選' : ''}`;
     $('empty').hidden = !!list.length; $('empty-title').textContent = catalog.total === 0 ? catalog.scan.running ? '正在整理第一批圖片。' : '等一張新作品。' : view === 'favorite' ? '從一張喜歡的開始。' : view === 'archived' ? '封存區，暫時空著。' : '這一組已經看完了。';
-    $('empty-description').textContent = catalog.total === 0 ? '將圖片保存到 IMG-save，網站就會自動收錄。' : '試試切換批次、清除搜尋，或到其他分類看看。';
-    $('load-more').hidden = list.length <= shown.length; $('load-more').textContent = `載入更多 · 還有 ${list.length - shown.length} 張`;
-    $('export-favorites').disabled = !catalog.images.some(i=>i.status==='favorite'&&baseFilter(i));
+    $('empty-description').textContent = catalog.total === 0 ? catalog.cloud?'先到圖庫設定取得配對資料，貼入 Firefox 外掛。生成後請等外掛顯示雲端已核對，圖片才會出現在這裡。':'將圖片保存到 IMG-save，網站就會自動收錄。' : '試試切換批次、清除搜尋，或到其他分類看看。';
+    $('load-more').hidden = catalog.paged?catalog.nextCursor===null:list.length <= shown.length; $('load-more').textContent = `載入更多 · 還有 ${catalog.paged?catalog.filteredCount-list.length:list.length - shown.length} 張`;
+    $('export-favorites').disabled = catalog.paged?view!=='favorite'||!catalog.images.length:!catalog.images.some(i=>i.status==='favorite'&&baseFilter(i));
+    if(catalog.paged)$('export-favorites').title='切到「喜歡的」後，匯出目前已載入的收藏。更多圖片請先載入下一頁。';
     $('library-info').textContent = `共 ${catalog.total} 張圖片 · ${catalog.sourceCount} 個來源檔案`;
     renderSelection(); renderScan(catalog.scan); updateViewer(); updateCompare();
   }
+  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','device','workspace'])if($(id)?.value)p.set(id,$(id).value);return p;}
+  let loadedQuery='',loadingMore=false,filterTimer;
   function refresh(full = false) {
     if (refreshing) return full ? refreshing.catch(()=>{}).then(()=>refresh(true)) : refreshing;
     const task = (async()=>{ try {
-      const response = await api('/api/catalog' + (!full && catalog ? `?revision=${catalog.revision}&instance=${encodeURIComponent(catalog.instanceId)}` : ''));
-      if(!response.unchanged&&response.cloud){
+      const params=query(),requested=params.toString();if(!full&&catalog&&loadedQuery===requested){params.set('revision',catalog.revision);params.set('instance',catalog.instanceId);}
+      const response = await api('/api/catalog?'+params);
+      if(requested!==query().toString())return;
+      // Refresh only the pages already read, keeping later-page selections and
+      // the open viewer stable when another device uploads a new image.
+      if(!response.unchanged&&response.paged&&loadedQuery===requested&&catalog?.paged){
+        const wanted=catalog.images.length,seen=new Set();
+        while(response.images.length<wanted&&response.nextCursor!==null){
+          if(seen.has(response.nextCursor))throw Error('圖庫分頁重複，請重新整理。');
+          seen.add(response.nextCursor);const more=query();more.set('cursor',response.nextCursor);more.set('snapshot',response.revision);
+          const next=await api('/api/catalog?'+more);if(requested!==query().toString())return;
+          if(next.revision!==response.revision)throw Object.assign(Error('圖庫正在更新，稍後重新讀取。'),{network:true});
+          response.images.push(...next.images);response.nextCursor=next.nextCursor;
+        }
+      }
+      if(!response.unchanged&&response.cloud&&!response.paged){
         const seen=new Set();while(response.nextCursor!==null&&response.nextCursor!==undefined){if(seen.has(response.nextCursor))throw Error('圖庫分頁重複，請重新整理。');seen.add(response.nextCursor);const next=await api('/api/catalog?cursor='+response.nextCursor);if(next.revision!==response.revision)throw Object.assign(Error('圖庫正在更新，稍後重新讀取。'),{network:true});response.images.push(...next.images);response.nextCursor=next.nextCursor;}
         response.batches=[...new Map(response.images.flatMap(image=>image.sources).map(source=>[source.batch,{id:source.batch,label:source.batchLabel}])).values()];response.total=response.images.length;response.sourceCount=response.images.reduce((n,image)=>n+image.sources.length,0);response.counts=Object.fromEntries(['pending','favorite','archived'].map(status=>[status,response.images.filter(image=>image.status===status).length]));
       }
       if (response.unchanged) { catalog.scan = response.scan; renderScan(response.scan); }
-      else { catalog = response; catalog.images = catalog.images.filter(i=>idPattern.test(i.id)&&Array.isArray(i.sources)&&i.sources.length); selected = new Set([...selected].filter(id=>asset(id))); render(); }
+      else { loadedQuery=requested;catalog = response;page=response.paged?Math.max(1,Math.ceil(response.images.length/60)):1; catalog.images = catalog.images.filter(i=>idPattern.test(i.id)&&Array.isArray(i.sources)&&i.sources.length); selected = new Set([...selected].filter(id=>asset(id))); render(); }
       connection(true);
     } catch (error) { if (error.status !== 401) connection(false, error.message); throw error; }
     finally { /* The owner of the promise clears it below. */ } })();
@@ -136,7 +157,7 @@
     } catch (error) {
       if (!error.network && error.status!==401) savePending(null);
       if (error.network) connection(false, '變更尚未確認，重新連接後會核對同一筆操作。');
-      else toast(error.message);
+      else {toast(error.message);if(error.status===409)await refresh(true).catch(()=>{});}
     } finally { busy = false; render(); }
   }
   function review(ids, status) { if (!ids.length || busy || pendingOperation) return; return perform({ requestId: uuid(), ids, status, expected:Object.fromEntries(ids.map(id=>[id,asset(id)?.reviewVersion])) }); }
@@ -178,15 +199,21 @@
       await refresh(true);$('gate').hidden=true;$('app').hidden=false;$('version').textContent='v'+catalog.version;loadPending();render();if(pendingOperation)void perform(pendingOperation,true);
     } catch(error){gate(error.status===401?'請使用完整、有效的專用連結開啟圖庫。':error.message,error.status!==401);}
   }
-  $('views').onclick=event=>{const button=event.target.closest('button[data-view]');if(button){view=button.dataset.view;page=1;selected.clear();render();}};
-  for(const id of ['search','batch','round','sort'])$(id).addEventListener(id==='search'?'input':'change',()=>{page=1;selected.clear();render();});
+  const filterChanged=()=>{page=1;selected.clear();if(catalog?.paged)void refresh(true).catch(error=>toast(error.message));else render();};
+  $('views').onclick=event=>{const button=event.target.closest('button[data-view]');if(button){view=button.dataset.view;filterChanged();}};
+  for(const id of ['search','batch','round','sort','device','workspace'])$(id)?.addEventListener(id==='search'?'input':'change',()=>{clearTimeout(filterTimer);if(id==='search')filterTimer=setTimeout(filterChanged,250);else filterChanged();});
   $('select-all').onchange=()=>{if($('select-all').checked){const list=images();selected=new Set(list.slice(0,500).map(i=>i.id));if(list.length>500)toast('已選前 500 張，可分批整理。');}else selected.clear();lastGrid='';render();};
   $('deselect').onclick=()=>{selected.clear();lastGrid='';render();};
-  $('load-more').onclick=()=>{page++;render();};
+  $('load-more').onclick=async()=>{
+    if(!catalog?.paged){page++;render();return;}if(loadingMore||catalog.nextCursor===null)return;loadingMore=true;$('load-more').disabled=true;
+    const snapshot=catalog.revision,params=query(),requested=params.toString();params.set('cursor',catalog.nextCursor);params.set('snapshot',snapshot);
+    try{const result=await api('/api/catalog?'+params);if(snapshot===catalog.revision&&requested===query().toString()){catalog.images.push(...result.images.filter(i=>!asset(i.id)));catalog.nextCursor=result.nextCursor;page++;render();}}
+    catch(error){if(error.status===409)await refresh(true).catch(()=>{});toast(error.message);}finally{loadingMore=false;$('load-more').disabled=false;}
+  };
   for(const [id,status]of[['bulk-favorite','favorite'],['bulk-archive','archived'],['bulk-pending','pending']])$(id).onclick=()=>review([...selected],status);
   $('compare-selected').onclick=()=>{if(selected.size<2||selected.size>4)return;lastCompare='';$('compare').showModal();updateCompare();};
   $('export-selected').onclick=()=>exportImages([...selected]);$('export-favorites').onclick=()=>exportImages(catalog.images.filter(i=>i.status==='favorite'&&baseFilter(i)).map(i=>i.id));
-  $('scan').onclick=async()=>{try{await api('/api/scan',{});await refresh(true);toast('開始檢查新圖片，已保存的分類會保留。');}catch(error){toast(error.message);}};
+  $('scan').onclick=async()=>{try{if(!catalog?.cloud)await api('/api/scan',{});await refresh(true);toast(catalog?.cloud?'已更新雲端成果；尚未上傳的檔案請在外掛查看同步狀態。':'開始檢查新圖片，已保存的分類會保留。');}catch(error){toast(error.message);}};
   $('previous').onclick=()=>navigate(-1);$('next').onclick=()=>navigate(1);
   $('zoom').onclick=()=>{zoomed=!zoomed;$('image-scroll').classList.toggle('is-zoomed',zoomed);$('zoom').setAttribute('aria-pressed',String(zoomed));};
   $('viewer').addEventListener('close',()=>{viewerId=null;$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;});
