@@ -8,3 +8,42 @@
 #cloud-task-detail > a { display: inline-block; margin: 6px; }
 #cloud-pair-json { width: 100%; resize: vertical; margin-top: 12px; }
 #cloud-devices li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; overflow-wrap: anywhere; }
+/* Research reports share the gallery's private access and paired uploads. */
+.cloud-gallery .header-actions{flex-wrap:wrap}
+#cloud-show-text{white-space:nowrap}
+.research-dialog{width:1120px;max-width:calc(100vw - 28px);max-height:92dvh}
+.research-dialog .dialog-heading h2{font-size:20px}
+.research-hint{margin:0;padding:16px 24px 0;color:var(--muted);font-size:13px;line-height:1.7}
+.research-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px;border-bottom:1px solid var(--line)}
+.research-toolbar p{margin:0;font-size:12px;color:var(--muted)}
+.research-toolbar button{flex-shrink:0}
+.research-layout{display:grid;grid-template-columns:240px minmax(0,1fr);align-items:start}
+.research-list{padding:16px;border-right:1px solid var(--line);min-width:0}
+.research-list>div>p{font-size:13px;line-height:1.8;color:var(--muted)}
+.cloud-task-button{padding:12px;overflow-wrap:anywhere}
+.cloud-task-button strong,.cloud-task-button span,.cloud-task-button small{display:block}
+.cloud-task-button strong{font-size:14px;line-height:1.6}
+.cloud-task-button span{font-size:11px;line-height:1.7;margin-top:5px;color:var(--muted)}
+.cloud-task-button small{font-size:10px;color:var(--muted);margin-top:6px}
+.cloud-task-button[aria-pressed=true]{background:var(--soft);border-color:var(--green)}
+#cloud-task-detail{padding:24px;min-width:0;overflow-wrap:anywhere}
+#cloud-task-detail>h3{font-size:23px;line-height:1.4;margin-bottom:10px}
+#cloud-task-detail>p{font-size:13px;line-height:1.8;color:var(--muted)}
+#cloud-task-detail h4{font-size:15px;margin:26px 0 12px}
+.research-downloads{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.research-downloads a{text-decoration:none;display:inline-block}
+.research-body{font-size:15px;line-height:1.9}
+.research-body h2{font-size:22px;line-height:1.5;margin:22px 0 12px}
+#cloud-task-detail .research-body h3{font-size:19px;line-height:1.5;margin:22px 0 12px}
+.research-body p{margin:12px 0;white-space:pre-wrap}
+.research-body a,.research-sources a,.research-stage a{color:var(--green);overflow-wrap:anywhere}
+.research-body pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;background:var(--soft);border-radius:10px;font-size:12px}
+.research-body ul,.research-body ol{padding-left:24px}
+.research-table{overflow:auto;max-width:100%;margin:16px 0;border:1px solid var(--line);border-radius:8px}
+.research-table table{border-collapse:collapse;min-width:100%;font-size:13px}
+.research-table th,.research-table td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);min-width:90px;vertical-align:top}
+.research-table th{background:var(--soft)}
+.research-stage,.research-sources{padding:12px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.8}
+.research-stage summary,.research-sources summary{cursor:pointer;font-weight:650}
+.research-stage .cloud-report-text{padding:12px;background:var(--paper);border-radius:8px}
+@media(max-width:700px){.research-dialog{max-width:calc(100vw - 14px);max-height:95dvh}.research-layout{grid-template-columns:minmax(0,1fr)}.research-list{border-right:0;border-bottom:1px solid var(--line);max-height:220px;overflow:auto;padding:10px 16px}.research-hint{padding:14px 16px 0;font-size:12px}.research-toolbar{padding:12px 16px}#cloud-task-detail{padding:20px 16px}#cloud-task-detail>h3{font-size:20px}.research-body{font-size:14px}.research-table th,.research-table td{padding:8px}.research-dialog .dialog-heading h2{font-size:17px}}
