@@ -2,7 +2,7 @@
   const $ = id => document.getElementById(id), labels = { pending: '待篩選', favorite: '喜歡的', archived: '已封存', all: '所有圖片' };
   const idPattern = /^[a-f0-9]{64}$/;
   const uuid = () => crypto.randomUUID ? crypto.randomUUID() : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (Number(c) ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> Number(c) / 4).toString(16));
-  let catalog, view = 'pending', page = 1, selected = new Set(), viewerId, zoomed = false, busy = false, refreshing = false, offline = false, undoChanges, toastTimer;
+  let catalog, view = 'pending', page = 1, selected = new Set(), viewerId, zoomed = false, busy = false, refreshing = false, offline = false, undoChanges, undoKind='review', toastTimer;
   let pendingKey = new URLSearchParams(location.hash.slice(1)).get('access'), pendingOperation, lastGrid = '', lastOptions = '', lastCompare = '';
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   const node = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; };
@@ -11,7 +11,7 @@
   const asset = id => catalog?.images.find(image => image.id === id);
   const transport=globalThis.GPT2WEBGalleryTransport;
   const setImage=(el,route)=>{if(transport)transport.image(el,route);else el.src=route;};
-  function toast(message, changes) { clearTimeout(toastTimer); const dialog=[...document.querySelectorAll('dialog[open]')].at(-1);(dialog||document.body).append($('toast'));$('toast-message').textContent = message; $('toast').hidden = false; undoChanges = changes?.length ? changes : null; $('undo').hidden = !undoChanges; toastTimer = setTimeout(() => { $('toast').hidden = true; }, undoChanges ? 25000 : 8000); }
+  function toast(message, changes, kind = 'review') { undoKind=kind; clearTimeout(toastTimer); const dialog=[...document.querySelectorAll('dialog[open]')].at(-1);(dialog||document.body).append($('toast'));$('toast-message').textContent = message; $('toast').hidden = false; undoChanges = changes?.length ? changes : null; $('undo').hidden = !undoChanges; toastTimer = setTimeout(() => { $('toast').hidden = true; }, undoChanges ? 25000 : 8000); }
   async function api(route, value) {
     let response;
     try { response = await (transport?.fetch||fetch)(route, { method: value === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -25,7 +25,7 @@
   function connection(connected, message) { offline = !connected; $('connection').dataset.state = connected ? 'connected' : 'offline'; $('connection').textContent = connected ? '已連接' : '重新連接中'; $('offline').hidden = connected && !pendingOperation; $('offline').textContent = message || (pendingOperation ? '上次變更尚未確認，重新連接後會核對同一筆操作。' : '暫時失去連線，已載入的圖片會保留，稍後自動重連。'); }
   const pendingStorageKey = () => 'gpt2web-gallery-pending-' + catalog?.instanceId;
   function savePending(value) { pendingOperation = value; try { if (value) localStorage.setItem(pendingStorageKey(), JSON.stringify(value)); else localStorage.removeItem(pendingStorageKey()); } catch { /* The server's idempotency receipt still prevents replay. */ } }
-  function loadPending() { try { const saved = JSON.parse(localStorage.getItem(pendingStorageKey())); if (saved?.requestId && (Array.isArray(saved.ids) || Array.isArray(saved.restore))) pendingOperation = saved; } catch { /* Ignore a damaged local receipt. */ } }
+  function loadPending() { try { const saved = JSON.parse(localStorage.getItem(pendingStorageKey())); if (saved?.requestId && (Array.isArray(saved.ids) || Array.isArray(saved.restore) || saved.kind==='category-manage')) pendingOperation = saved; } catch { /* Ignore a damaged local receipt. */ } }
   function baseFilter(image) {
     const query = $('search').value.trim().toLocaleLowerCase(), batch = $('batch').value, round = $('round').value;
     return image.sources.some(source => (!batch || source.batch === batch) && (!round || String(source.round) === round) &&
@@ -50,7 +50,7 @@
     button.disabled = busy || !!pendingOperation;
     button.onclick = () => review([image.id], image.status === status && status !== 'pending' ? 'pending' : status); return button;
   }
-  function actions(image, compact = false) { const row = node('div', compact ? 'card-actions' : 'review-actions'); for (const status of ['favorite', 'archived', 'pending']) row.append(reviewButton(image, status, compact)); return row; }
+  function actions(image, compact = false) { const row = node('div', compact ? 'card-actions' : 'review-actions'); for (const status of ['favorite', 'archived', 'pending']) row.append(reviewButton(image, status, compact)); if(catalog?.categories)row.append(globalThis.GPT2WEBCategoryUI?.button(image)||document.createTextNode('')); return row; }
   function card(image) {
     const source = image.sources[0], article = node('article', 'image-card' + (selected.has(image.id) ? ' is-selected' : '')); article.dataset.id = image.id;
     const checkLabel = node('label', 'card-select'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(image.id); checkbox.setAttribute('aria-label', '選取 ' + source.filename);
@@ -64,7 +64,7 @@
       if(retries<3){const delay=[1500,4000,10000][retries++];setTimeout(()=>{if(imageEl.isConnected&&!$('app').hidden)setImage(imageEl,`/api/images/${image.id}/thumb?retry=${retries}`);},delay);}};
     media.append(imageEl,loading); media.onclick = () => openViewer(image.id); article.append(media);
     if (image.status !== 'pending') { const tag = node('span', 'card-tag', image.status === 'favorite' ? '♥ 已收藏' : '已封存'); tag.dataset.state = image.status; article.append(tag); }
-    const details = node('div', 'card-body'); details.append(node('p', 'card-batch', source.batchLabel + (source.round ? ' · 第 ' + source.round + ' 輪' : '')),
+    const details = node('div', 'card-body'); if(catalog?.categories)details.append(globalThis.GPT2WEBCategoryUI?.badge(image)||document.createTextNode('')); details.append(node('p', 'card-batch', source.batchLabel + (source.round ? ' · 第 ' + source.round + ' 輪' : '')),
       node('h2', 'card-title', source.filename), node('p', 'card-detail', `${image.width} × ${image.height} · ${bytes(image.bytes)}${image.sources.length > 1 ? ' · ' + image.sources.length + ' 個來源' : ''}`));
     article.append(details, actions(image, true)); return article;
   }
@@ -82,6 +82,7 @@
   }
   function render() {
     if (!catalog) return;
+    globalThis.GPT2WEBCategoryUI?.render(catalog,{selected:[...selected],viewerId,busy:busy||!!pendingOperation});
     for (const status of ['pending', 'favorite', 'archived']) $('count-' + status).textContent = catalog.counts[status]; $('count-all').textContent = catalog.total;
     for (const button of $('views').querySelectorAll('button')) { if (button.dataset.view === view) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }
     $('view-title').textContent = { pending: '先看看，慢慢挑。', favorite: '喜歡的，都留在這裡。', archived: '先收好，隨時再看。', all: '每一次生成，都在這裡。' }[view];
@@ -95,10 +96,10 @@
       for(const [id,values,label] of [['device',(catalog.devices||[]),'所有裝置'],['workspace',(catalog.workspaces||[]).map(w=>({id:w.name,label:w.name})),'所有工作區']])if($(id)){const chosen=$(id).value;$(id).replaceChildren(new Option(label,''),...values.map(v=>new Option(v.label,v.id)));$(id).value=values.some(v=>v.id===chosen)?chosen:'';}
       if (catalog.batches.some(b=>b.id===batch)) $('batch').value = batch; if ([...$('round').options].some(o=>o.value===round)) $('round').value = round;
     }
-    const list = images(), shown = list.slice(0, page * 60), signature = JSON.stringify([shown.map(i=>[i.id,i.status,i.reviewVersion,i.sources]),busy,!!pendingOperation]);
+    const categoryNames=catalog.categories?.map(c=>[c.id,c.name,c.version]),list = images(), shown = list.slice(0, page * 60), signature = JSON.stringify([shown.map(i=>[i.id,i.status,i.reviewVersion,i.categoryId,i.categoryVersion,i.categorySource,i.sources]),categoryNames,busy,!!pendingOperation]);
     if (signature !== lastGrid) {
       lastGrid=signature;const old=new Map([...$('grid').children].map(el=>[el.dataset.id,el])),keep=new Set();let cursor=$('grid').firstChild;
-      for(const image of shown){const key=JSON.stringify([image.status,image.reviewVersion,image.sources]);let el=old.get(image.id);if(!el||el.dataset.renderKey!==key){el=card(image);el.dataset.renderKey=key;}
+      for(const image of shown){const key=JSON.stringify([image.status,image.reviewVersion,image.categoryId,image.categoryVersion,image.categorySource,image.sources,categoryNames]);let el=old.get(image.id);if(!el||el.dataset.renderKey!==key){el=card(image);el.dataset.renderKey=key;}
         el.classList.toggle('is-selected',selected.has(image.id));el.querySelector('input[type=checkbox]').checked=selected.has(image.id);
         for(const button of el.querySelectorAll('.review-button'))button.disabled=busy||!!pendingOperation;
         if(el!==cursor)$('grid').insertBefore(el,cursor);cursor=el.nextSibling;keep.add(el);}
@@ -111,9 +112,9 @@
     $('export-favorites').disabled = catalog.paged?view!=='favorite'||!catalog.images.length:!catalog.images.some(i=>i.status==='favorite'&&baseFilter(i));
     if(catalog.paged)$('export-favorites').title='切到「喜歡的」後，匯出目前已載入的收藏。更多圖片請先載入下一頁。';
     $('library-info').textContent = `共 ${catalog.total} 張圖片 · ${catalog.sourceCount} 個來源檔案`;
-    renderSelection(); renderScan(catalog.scan); updateViewer(); updateCompare();
+    renderSelection(); renderScan(catalog.scan); updateViewer(); updateCompare(); globalThis.GPT2WEBCategoryUI?.render(catalog,{selected:[...selected],viewerId,busy:busy||!!pendingOperation});
   }
-  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','device','workspace'])if($(id)?.value)p.set(id,$(id).value);return p;}
+  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','device','workspace'])if($(id)?.value)p.set(id,$(id).value);globalThis.GPT2WEBCategoryUI?.query(p);return p;}
   let loadedQuery='',loadingMore=false,filterTimer;
   function refresh(full = false) {
     if (refreshing) return full ? refreshing.catch(()=>{}).then(()=>refresh(true)) : refreshing;
@@ -148,11 +149,11 @@
     if (busy) return; busy = true; savePending(operation); render();
     const oldList = images(), currentIndex = oldList.findIndex(i=>i.id===viewerId), nextId = oldList[currentIndex+1]?.id || oldList[currentIndex-1]?.id;
     try {
-      const result = await api('/api/reviews', operation); savePending(null);
-      if (!$('compare').open) for (const change of result.changed) selected.delete(change.id);
+      const categoryOperation=operation.kind==='category',management=operation.kind==='category-manage'; const result = await api(categoryOperation?'/api/categories/assign':management?'/api/categories/manage':'/api/reviews', operation); savePending(null);
+      if (!$('compare').open) for (const change of result.changed||[]) selected.delete(change.id);
       await refresh(true);
       if (viewerId && !images().some(i=>i.id===viewerId)) { if (nextId && images().some(i=>i.id===nextId)) viewerId = nextId; else { viewerId = null; $('viewer').close(); } }
-      toast(recovered ? '已核對並保存上次變更。' : operation.restore ? '已復原剛才的變更。' : `已保存 ${result.changed.length} 張圖片的分類。`, operation.restore ? null : result.changed);
+      toast(recovered ? '已核對並保存上次變更。' : operation.restore ? '已復原剛才的變更。' : management?'已更新主題分類。':categoryOperation?`已調整 ${result.changed.length} 張圖片的主題分類。`:`已保存 ${result.changed.length} 張圖片的收藏狀態。`, operation.restore ? null : result.changed, categoryOperation?'category':'review'); globalThis.GPT2WEBCategoryUI?.saved(operation);
       connection(true);
     } catch (error) {
       if (!error.network && error.status!==401) savePending(null);
@@ -226,7 +227,7 @@
   document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
   for(const dialog of document.querySelectorAll('dialog'))dialog.addEventListener('click',event=>{if(event.target!==dialog)return;const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();});
   for(const dialog of document.querySelectorAll('dialog'))dialog.addEventListener('close',()=>{if($('toast').parentElement===dialog)document.body.append($('toast'));});
-  $('undo').onclick=()=>{if(!undoChanges||busy||pendingOperation)return;void perform({requestId:uuid(),restore:undoChanges.map(c=>({id:c.id,status:c.before,expectedVersion:c.version}))});};
+  $('undo').onclick=()=>{if(!undoChanges||busy||pendingOperation)return;void perform(undoKind==='category'?{kind:'category',action:'restore',requestId:uuid(),restore:undoChanges.map(c=>({id:c.id,categoryId:c.before,source:c.beforeSource,expectedVersion:c.version}))}:{requestId:uuid(),restore:undoChanges.map(c=>({id:c.id,status:c.before,expectedVersion:c.version}))});};
   $('toast-close').onclick=()=>{$('toast').hidden=true;};
   $('copy-link').onclick=()=>copyLink();$('settings-copy').onclick=()=>copyLink();$('open-settings').onclick=()=>$('settings').showModal();
   $('rotate-link').onclick=()=>{if(confirm('更換後，舊連結及其他裝置的存取會失效。現在更換並保存新連結？'))void copyLink(true);};
@@ -238,5 +239,6 @@
   $('viewer-image').onerror=()=>toast('原檔暫時無法載入，可稍後重開圖片。');
   setInterval(async()=>{if($('app').hidden)return;try{await refresh();if(pendingOperation&&!busy)await perform(pendingOperation,true);}catch{/* Retry the same operation after connectivity returns. */}},5000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!$('app').hidden)void refresh().catch(()=>{});});
+  globalThis.GPT2WEBGalleryUI={api,perform,refresh,toast,filterChanged,getCatalog:()=>catalog,getSelection:()=>[...selected]};
   void boot();
 })();
