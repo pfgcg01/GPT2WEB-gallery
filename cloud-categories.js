@@ -47,7 +47,7 @@
     manage.id = "manage-categories";
     manage.onclick = () => {
       $("category-manage").showModal();
-      renderManage();
+      renderManage(true);
     };
     heading.append(copy, manage);
     const nav = el("div", undefined, "subject-tabs");
