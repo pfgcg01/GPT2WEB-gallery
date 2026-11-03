@@ -50,16 +50,33 @@ export async function cloudZip(
     for (let attempt = 0; !data; attempt++) {
       try {
         const url = new URL(await resolveUrl(entry));
+        const supabase =
+          /^[-a-z0-9]+\.supabase\.co$/iu.test(url.hostname) &&
+          url.pathname.startsWith("/storage/v1/object/sign/");
+        const github =
+          url.origin === "https://raw.githubusercontent.com" &&
+          new RegExp(
+            "^/Novel-1234/GEN-IMG/[a-f0-9]{40}/originals/" +
+              entry.id.slice(0, 2) +
+              "/" +
+              entry.id +
+              "\\.(png|jpg|webp)$",
+            "u",
+          ).test(url.pathname) &&
+          !url.search &&
+          !url.hash;
         if (
           url.protocol !== "https:" ||
-          !/^[-a-z0-9]+\.supabase\.co$/iu.test(url.hostname) ||
-          !url.pathname.startsWith("/storage/v1/object/sign/")
+          url.username ||
+          url.password ||
+          (!supabase && !github)
         )
           throw Object.assign(Error("原檔下載位址不正確。"), {
             terminal: true,
           });
         const response = await request(url.href, {
           credentials: "omit",
+          redirect: "error",
           referrerPolicy: "no-referrer",
           signal: AbortSignal.timeout(90000),
         });

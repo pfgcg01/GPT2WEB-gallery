@@ -60,10 +60,17 @@
         result = await response.json();
       if (!response.ok) throw Error(result.error || "圖片暫時無法載入。");
       const u = new URL(result.url);
-      if (
-        u.origin !== base.origin ||
-        !u.pathname.startsWith("/storage/v1/object/sign/gpt2web-private/")
-      )
+      const supabase =
+        u.origin === base.origin &&
+        u.pathname.startsWith("/storage/v1/object/sign/gpt2web-private/");
+      const github =
+        u.origin === "https://raw.githubusercontent.com" &&
+        /^\/Novel-1234\/GEN-IMG\/[a-f0-9]{40}\/(?:originals|thumbs)\/[a-f0-9]{2}\/[a-f0-9]{64}\.(?:png|jpg|webp)$/u.test(
+          u.pathname,
+        ) &&
+        !u.search &&
+        !u.hash;
+      if (u.username || u.password || (!supabase && !github))
         throw Error("圖片來源不正確。");
       return u.href;
     })();
@@ -108,12 +115,48 @@
       event.preventDefault();
       try {
         const a = document.createElement("a");
-        a.href = await mediaUrl(route);
+        const source = await mediaUrl(route);
+        if (new URL(source).origin === base.origin) {
+          // Supabase supplies Content-Disposition, including HTML/Markdown
+          // report names. Preserve that download behavior for private files.
+          a.href = source;
+          a.rel = "noopener noreferrer";
+          a.download = "";
+          document.body.append(a);
+          a.click();
+          a.remove();
+          return;
+        }
+        // Cross-origin Raw URLs do not honor the download attribute. Save the
+        // fetched original bytes as a local Blob instead of navigating away.
+        const response = await fetch(source, {
+          credentials: "omit",
+          redirect: "error",
+          signal: AbortSignal.timeout(120000),
+        });
+        if (!response.ok) throw Error("原圖暫時無法下載。");
+        const blob = await response.blob();
+        const digest = [
+          ...new Uint8Array(
+            await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()),
+          ),
+        ]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        if (digest !== route.split("/")[3])
+          throw Error("原圖校驗不符，沒有保存不完整的檔案。");
+        const objectUrl = URL.createObjectURL(blob);
+        a.href = objectUrl;
         a.rel = "noopener noreferrer";
-        a.download = "";
+        a.download =
+          "image-" +
+          route.split("/")[3].slice(0, 12) +
+          "." +
+          (new URL(source).pathname.match(/\.(png|jpg|webp)$/u)?.[1] || "png");
         document.body.append(a);
         a.click();
         a.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
       } catch (error) {
         alert(error.message);
       }
