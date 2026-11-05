@@ -50,7 +50,7 @@
     button.disabled = busy || !!pendingOperation;
     button.onclick = () => review([image.id], image.status === status && status !== 'pending' ? 'pending' : status); return button;
   }
-  function actions(image, compact = false) { const row = node('div', compact ? 'card-actions' : 'review-actions'); for (const status of ['favorite', 'archived', 'pending']) row.append(reviewButton(image, status, compact)); if(catalog?.categories)row.append(globalThis.GPT2WEBCategoryUI?.button(image)||document.createTextNode('')); return row; }
+  function actions(image, compact = false) { const row = node('div', compact ? 'card-actions' : 'review-actions'); for (const status of ['favorite', 'archived', 'pending']) row.append(reviewButton(image, status, compact)); if(catalog?.categories)row.append(globalThis.GPT2WEBCategoryUI?.button(image)||document.createTextNode(''));if(catalog?.cloud&&globalThis.GPT2WEBPromptUI)row.append(GPT2WEBPromptUI.button(image)); return row; }
   function card(image) {
     const source = image.sources[0], article = node('article', 'image-card' + (selected.has(image.id) ? ' is-selected' : '')); article.dataset.id = image.id;
     const checkLabel = node('label', 'card-select'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(image.id); checkbox.setAttribute('aria-label', '選取 ' + source.filename);
@@ -66,6 +66,7 @@
     if (image.status !== 'pending') { const tag = node('span', 'card-tag', image.status === 'favorite' ? '♥ 已收藏' : '已封存'); tag.dataset.state = image.status; article.append(tag); }
     const details = node('div', 'card-body'); if(catalog?.categories)details.append(globalThis.GPT2WEBCategoryUI?.badge(image)||document.createTextNode('')); details.append(node('p', 'card-batch', source.batchLabel + (source.round ? ' · 第 ' + source.round + ' 輪' : '')),
       node('h2', 'card-title', source.filename), node('p', 'card-detail', `${image.width} × ${image.height} · ${bytes(image.bytes)}${image.sources.length > 1 ? ' · ' + image.sources.length + ' 個來源' : ''}`));
+    const promptPreview=catalog?.cloud&&globalThis.GPT2WEBPromptUI?.preview(image);if(promptPreview)details.append(promptPreview);
     article.append(details, actions(image, true)); return article;
   }
   function renderSelection() {
