@@ -6,7 +6,7 @@
       model: ["模型", 120],
       notes: ["備註", 2000],
     },
-    MAX = 24 * 1024 * 1024,
+    MAX = 40 * 1024 * 1024,
     LIMIT = 512 * 1024 * 1024;
   const ui = () => globalThis.GPT2WEBGalleryUI,
     transfer = () => globalThis.GPT2WEBUploadTransfer;
@@ -101,6 +101,9 @@
     clear.disabled = running || adding || !items.length;
     picker.disabled = running || adding;
     common.disabled = running || adding;
+    // Rows created while adding are disabled until the selection is committed.
+    // Refresh every row when the queue returns to idle or begins uploading.
+    for (const item of items) renderItem(item);
   }
   function renderItem(item) {
     let row = rows.get(item.id);
@@ -239,7 +242,7 @@
           continue;
         }
         if (!file.size || file.size > MAX) {
-          problems.push(file.name + "：單檔需為 1 byte–24 MiB");
+          problems.push(file.name + "：單檔需為 1 byte–40 MiB");
           continue;
         }
         if (
@@ -317,7 +320,7 @@
       picker,
       el(
         "p",
-        "或將檔案拖曳到這裡。支援 PNG、JPG、WebP、GIF、MP4、WebM；單檔最多 24 MiB。影片能否播放取決於瀏覽器支援的編碼。",
+        "或將檔案拖曳到這裡。支援 PNG、JPG、WebP、GIF、MP4、WebM；單檔最多 40 MiB。影片能否播放取決於瀏覽器支援的編碼。",
       ),
     );
     drop.ondragover = (e) => e.preventDefault();
