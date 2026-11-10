@@ -67,6 +67,8 @@
     const details = node('div', 'card-body'); if(catalog?.categories)details.append(globalThis.GPT2WEBCategoryUI?.badge(image)||document.createTextNode('')); details.append(node('p', 'card-batch', source.batchLabel + (source.round ? ' · 第 ' + source.round + ' 輪' : '')),
       node('h2', 'card-title', source.filename), node('p', 'card-detail', `${image.width} × ${image.height} · ${bytes(image.bytes)}${image.sources.length > 1 ? ' · ' + image.sources.length + ' 個來源' : ''}`));
     const promptPreview=catalog?.cloud&&globalThis.GPT2WEBPromptUI?.preview(image);if(promptPreview)details.append(promptPreview);
+    if(image.kind==='video'||image.format==='gif')details.prepend(node('p','media-kind',image.kind==='video'?'▶ 影片':'GIF 動圖'));
+    if(source.model)details.append(node('p','card-detail','模型：'+source.model));
     article.append(details, actions(image, true)); return article;
   }
   function renderSelection() {
@@ -115,7 +117,7 @@
     $('library-info').textContent = `共 ${catalog.total} 張圖片 · ${catalog.sourceCount} 個來源檔案`;
     renderSelection(); renderScan(catalog.scan); updateViewer(); updateCompare(); globalThis.GPT2WEBCategoryUI?.render(catalog,{selected:[...selected],viewerId,busy:busy||!!pendingOperation});
   }
-  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','device','workspace'])if($(id)?.value)p.set(id,$(id).value);globalThis.GPT2WEBCategoryUI?.query(p);return p;}
+  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','device','workspace','media'])if($(id)?.value)p.set(id,$(id).value);globalThis.GPT2WEBCategoryUI?.query(p);return p;}
   let loadedQuery='',loadingMore=false,filterTimer;
   function refresh(full = false) {
     if (refreshing) return full ? refreshing.catch(()=>{}).then(()=>refresh(true)) : refreshing;
@@ -169,7 +171,9 @@
     const list = images(), index = list.findIndex(i=>i.id===viewerId), source = image.sources[0];
     $('viewer-title').textContent = source.filename; $('viewer-position').textContent = `${index>=0?index+1:'—'} / ${list.length} · ${labels[image.status]}`;
     $('viewer-meta').textContent = `${source.batchLabel}${source.round?' · 第 '+source.round+' 輪':''} · ${image.width} × ${image.height} · ${bytes(image.bytes)}`;
-    const src = `/api/images/${image.id}/original`; if (($('viewer-image').dataset.media||$('viewer-image').getAttribute('src')) !== src) { setImage($('viewer-image'),src); $('viewer-image').alt = source.filename; $('image-scroll').scrollTo(0,0); }
+    const video=$('viewer-video'),isVideo=image.kind==='video';
+    if(video){video.hidden=!isVideo;$('viewer-image').hidden=isVideo;$('zoom').hidden=isVideo;if(!isVideo&&video.dataset.media){video.pause();video.removeAttribute('src');delete video.dataset.media;video.load();}if(!isVideo)$('video-error').hidden=true;}
+    const src = `/api/images/${image.id}/original`; if(isVideo&&video){if(video.dataset.media!==src){$('video-error').hidden=true;setImage(video,src);video.onerror=()=>$('video-error').hidden=false;}$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;}else if (($('viewer-image').dataset.media||$('viewer-image').getAttribute('src')) !== src) { setImage($('viewer-image'),src); $('viewer-image').alt = source.filename; $('image-scroll').scrollTo(0,0); }
     if(transport)transport.download($('viewer-download'),src+'?download=1');else $('viewer-download').href = src + '?download=1'; $('previous').disabled = index<=0; $('next').disabled = index<0||index>=list.length-1;
     $('viewer-actions').replaceChildren(...actions(image).children);
   }
@@ -178,7 +182,7 @@
     if (!$('compare').open) return;
     const list = [...selected].map(asset).filter(Boolean), key = JSON.stringify(list.map(i=>[i.id,i.status,busy,!!pendingOperation])); if (key===lastCompare) return; lastCompare=key;
     const fragment=document.createDocumentFragment();
-    for (const image of list.slice(0,4)) { const item=node('article','compare-item'), img=node('img');setImage(img,`/api/images/${image.id}/original`);img.alt=image.sources[0].filename;item.append(img,node('p','',image.sources[0].filename),actions(image));fragment.append(item); }
+    for (const image of list.slice(0,4)) { const item=node('article','compare-item'), img=node(image.kind==='video'?'video':'img');if(image.kind==='video'){img.controls=true;img.preload='metadata';}setImage(img,`/api/images/${image.id}/original`);img.alt=image.sources[0].filename;item.append(img,node('p','',image.sources[0].filename),actions(image));fragment.append(item); }
     $('compare-grid').replaceChildren(fragment);
   }
   async function exportImages(ids) {
@@ -203,7 +207,7 @@
   }
   const filterChanged=()=>{page=1;selected.clear();if(catalog?.paged)void refresh(true).catch(error=>toast(error.message));else render();};
   $('views').onclick=event=>{const button=event.target.closest('button[data-view]');if(button){view=button.dataset.view;filterChanged();}};
-  for(const id of ['search','batch','round','sort','device','workspace'])$(id)?.addEventListener(id==='search'?'input':'change',()=>{clearTimeout(filterTimer);if(id==='search')filterTimer=setTimeout(filterChanged,250);else filterChanged();});
+  for(const id of ['search','batch','round','sort','device','workspace','media'])$(id)?.addEventListener(id==='search'?'input':'change',()=>{clearTimeout(filterTimer);if(id==='search')filterTimer=setTimeout(filterChanged,250);else filterChanged();});
   $('select-all').onchange=()=>{if($('select-all').checked){const list=images();selected=new Set(list.slice(0,500).map(i=>i.id));if(list.length>500)toast('已選前 500 張，可分批整理。');}else selected.clear();lastGrid='';render();};
   $('deselect').onclick=()=>{selected.clear();lastGrid='';render();};
   $('load-more').onclick=async()=>{
@@ -218,9 +222,9 @@
   $('scan').onclick=async()=>{try{if(!catalog?.cloud)await api('/api/scan',{});await refresh(true);toast(catalog?.cloud?'已更新雲端成果；尚未上傳的檔案請在外掛查看同步狀態。':'開始檢查新圖片，已保存的分類會保留。');}catch(error){toast(error.message);}};
   $('previous').onclick=()=>navigate(-1);$('next').onclick=()=>navigate(1);
   $('zoom').onclick=()=>{zoomed=!zoomed;$('image-scroll').classList.toggle('is-zoomed',zoomed);$('zoom').setAttribute('aria-pressed',String(zoomed));};
-  $('viewer').addEventListener('close',()=>{viewerId=null;$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;});
+  $('viewer').addEventListener('close',()=>{const video=$('viewer-video');if(video){video.pause();video.removeAttribute('src');delete video.dataset.media;video.load();}viewerId=null;$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;});
   $('compare').addEventListener('close',()=>{const visible=new Set(images().map(i=>i.id));selected=new Set([...selected].filter(id=>visible.has(id)));lastGrid='';render();});
-  document.addEventListener('keydown',event=>{if(!$('viewer').open||event.repeat||event.ctrlKey||event.metaKey||event.altKey||event.target.matches('input,textarea,select,[contenteditable=true]'))return;
+  document.addEventListener('keydown',event=>{if(!$('viewer').open||event.repeat||event.ctrlKey||event.metaKey||event.altKey||event.target.matches('input,textarea,select,video,[contenteditable=true]')||[...document.querySelectorAll('dialog[open]')].at(-1)!==$('viewer'))return;
     if(['ArrowLeft','ArrowRight','f','a','u'].includes(event.key.toLowerCase())||['ArrowLeft','ArrowRight'].includes(event.key))event.preventDefault();
     if(event.key==='ArrowLeft')navigate(-1);if(event.key==='ArrowRight')navigate(1);const image=asset(viewerId);if(!image)return;
     const status={f:'favorite',a:'archived',u:'pending'}[event.key.toLowerCase()];if(status)review([image.id],image.status===status&&status!=='pending'?'pending':status);

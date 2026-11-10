@@ -31,7 +31,7 @@
     dialog.id = "image-prompts";
     dialog.setAttribute("aria-labelledby", "image-prompts-title");
     const header = el("header", undefined, "dialog-heading"),
-      title = el("h2", "圖片的 Prompt");
+      title = el("h2", "作品資料與 Prompt");
     title.id = "image-prompts-title";
     const close = el("button", "關閉", "secondary");
     close.type = "button";
@@ -40,7 +40,7 @@
     header.append(title, close);
     const note = el(
       "p",
-      "這裡保存外掛本輪實際送出的文字。相同圖片來自多個輪次時，各來源分別列出。",
+      "這裡保存外掛送出的文字或手動上傳填寫的資料。同一原檔的不同來源會分別列出。",
       "prompt-note",
     );
     message = el("p");
@@ -110,8 +110,21 @@
             : classification?.state === "pending"
               ? "等待自動預分類。"
               : reasons[classification?.reason] || "";
+        const metadata = el("dl", undefined, "upload-metadata");
+        for (const [key, label] of [
+          ["source", "來源"],
+          ["model", "模型"],
+          ["notes", "備註"],
+        ])
+          if (entry[key])
+            metadata.append(el("dt", label), el("dd", entry[key]));
+        if (!entry.prompt) {
+          text.textContent = "此來源未填寫 Prompt。";
+          copy.hidden = true;
+        }
         details.append(
           summary,
+          metadata,
           batch,
           el("p", status, "prompt-note"),
           text,
@@ -123,8 +136,8 @@
       snapshot = data.snapshot;
       more.hidden = cursor === null;
       message.textContent = list.children.length
-        ? "已列出 " + list.children.length + " 個有保存 Prompt 的來源。"
-        : "這張圖片的既有來源未保存 Prompt。更新外掛並啟用「同步圖片 Prompt」後，新產生的圖片才會附上本輪提示詞。";
+        ? "已列出 " + list.children.length + " 個有保存資料的來源。"
+        : "此作品的既有來源未保存 Prompt／來源／模型。新上傳可選填這些資料；外掛則需啟用「同步圖片 Prompt」。";
     } catch (e) {
       if (ticket === generation && imageId === requested) {
         if (e.status === 409) {
@@ -158,7 +171,11 @@
   }
   globalThis.GPT2WEBPromptUI = {
     button(image) {
-      const button = el("button", "Prompt", "review-button prompt-button");
+      const button = el(
+        "button",
+        "資料／Prompt",
+        "review-button prompt-button",
+      );
       button.type = "button";
       button.setAttribute(
         "aria-label",

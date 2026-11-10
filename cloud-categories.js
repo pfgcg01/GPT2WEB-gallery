@@ -75,7 +75,11 @@
     bulk.id = "bulk-categorize";
     bulk.onclick = () => openPicker(ui().getSelection());
     document.querySelector(".bulk-actions").prepend(bulk);
-    const filters = [...document.querySelectorAll(".workspace > .filters")];
+    const filters = [
+      ...document.querySelectorAll(
+        ".workspace > .filters:not([data-media-filter])",
+      ),
+    ];
     if (filters.length) {
       const details = el("details", undefined, "source-filters");
       details.append(el("summary", "來源與進階篩選（批次、輪次、裝置）"));
