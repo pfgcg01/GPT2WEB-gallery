@@ -7,6 +7,12 @@
     "image/gif": "gif",
     "video/mp4": "mp4",
     "video/webm": "webm",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/mpeg": "mp3",
+    "model/gltf-binary": "glb",
+    "model/gltf+json": "gltf",
+    "model/fbx": "fbx",
   };
   const digest = async (value) =>
     [...new Uint8Array(await crypto.subtle.digest("SHA-256", value))]

@@ -57,17 +57,21 @@
     checkbox.onchange = () => { if (checkbox.checked && selected.size >= 500) { checkbox.checked = false; return toast('一次最多選取 500 張，請分批整理。'); } if (checkbox.checked) selected.add(image.id); else selected.delete(image.id); article.classList.toggle('is-selected', checkbox.checked); renderSelection(); };
     checkLabel.append(checkbox); article.append(checkLabel);
     const media = node('button', 'image-media'); media.type = 'button'; media.setAttribute('aria-label', '放大檢視 ' + source.filename);
-    const imageEl = node('img'); setImage(imageEl,`/api/images/${image.id}/thumb`); imageEl.alt = source.filename; imageEl.loading = 'lazy'; imageEl.decoding = 'async'; imageEl.width = 640; imageEl.height = 640;
+    const imageEl = node('img');
+    const noThumb = image.kind === 'audio' || image.kind === 'model3d';
+    if (!noThumb) { setImage(imageEl,`/api/images/${image.id}/thumb`); imageEl.alt = source.filename; imageEl.loading = 'lazy'; imageEl.decoding = 'async'; imageEl.width = 640; imageEl.height = 640; }
     const loading=node('span','thumb-loading','載入縮圖…');let retries=0;
     imageEl.onload=()=>{loading.remove();media.querySelector('.missing-thumb')?.remove();};
     imageEl.onerror = () => { loading.remove();if (!media.querySelector('.missing-thumb')) media.append(node('span', 'missing-thumb', '縮圖暫時無法載入'));
       if(retries<3){const delay=[1500,4000,10000][retries++];setTimeout(()=>{if(imageEl.isConnected&&!$('app').hidden)setImage(imageEl,`/api/images/${image.id}/thumb?retry=${retries}`);},delay);}};
-    media.append(imageEl,loading); media.onclick = () => openViewer(image.id); article.append(media);
+    if (noThumb) { imageEl.hidden = true; loading.remove(); media.append(node('span','media-placeholder',image.kind === 'audio' ? '♫ 音訊檔' : '◇ 3D 模型')); }
+    else media.append(imageEl,loading);
+    media.onclick = () => openViewer(image.id); article.append(media);
     if (image.status !== 'pending') { const tag = node('span', 'card-tag', image.status === 'favorite' ? '♥ 已收藏' : '已封存'); tag.dataset.state = image.status; article.append(tag); }
     const details = node('div', 'card-body'); if(catalog?.categories)details.append(globalThis.GPT2WEBCategoryUI?.badge(image)||document.createTextNode('')); details.append(node('p', 'card-batch', source.batchLabel + (source.round ? ' · 第 ' + source.round + ' 輪' : '')),
       node('h2', 'card-title', source.filename), node('p', 'card-detail', `${image.width} × ${image.height} · ${bytes(image.bytes)}${image.sources.length > 1 ? ' · ' + image.sources.length + ' 個來源' : ''}`));
     const promptPreview=catalog?.cloud&&globalThis.GPT2WEBPromptUI?.preview(image);if(promptPreview)details.append(promptPreview);
-    if(image.kind==='video'||image.format==='gif')details.prepend(node('p','media-kind',image.kind==='video'?'▶ 影片':'GIF 動圖'));
+    if(image.kind==='video'||image.format==='gif'||image.kind==='audio'||image.kind==='model3d')details.prepend(node('p','media-kind',image.kind==='video'?'▶ 影片':image.format==='gif'?'GIF 動圖':image.kind==='audio'?'♫ 音訊':'◇ 3D 模型'));
     if(source.model)details.append(node('p','card-detail','模型：'+source.model));
     article.append(details, actions(image, true)); return article;
   }
@@ -91,11 +95,12 @@
     $('view-title').textContent = { pending: '先看看，慢慢挑。', favorite: '喜歡的，都留在這裡。', archived: '先收好，隨時再看。', all: '每一次生成，都在這裡。' }[view];
     $('view-description').textContent = { pending: '喜歡的留下，其他的先收好。點開圖片，就能用鍵盤快速篩選。', favorite: '把值得留下的圖片集中起來，隨時比較、匯出。', archived: '暫時不選的圖片，仍能放大查看或還原。', all: '依批次與輪次回顧作品，找出下一張喜歡的圖片。' }[view];
     const roundOptions=catalog.rounds||[...new Set(catalog.images.flatMap(i=>i.sources.map(s=>s.round)).filter(Boolean))].sort((a,b)=>a-b);
-    const optionKey = JSON.stringify([catalog.batches, roundOptions,catalog.devices,catalog.workspaces]);
+    const optionKey = JSON.stringify([catalog.batches, roundOptions,catalog.sources,catalog.devices,catalog.workspaces]);
     if (optionKey !== lastOptions) {
       lastOptions = optionKey; const batch = $('batch').value, round = $('round').value;
       $('batch').replaceChildren(new Option('所有批次', '')); for (const b of catalog.batches) $('batch').append(new Option(b.label, b.id));
       $('round').replaceChildren(new Option('所有輪次', '')); for (const n of roundOptions) $('round').append(new Option('第 ' + n + ' 輪', String(n)));
+      if($('source')){const chosen=$('source').value;$('source').replaceChildren(new Option('所有服務商',''),...(catalog.sources||[]).map(v=>new Option(v.label,v.id)));$('source').value=(catalog.sources||[]).some(v=>v.id===chosen)?chosen:'';}
       for(const [id,values,label] of [['device',(catalog.devices||[]),'所有裝置'],['workspace',(catalog.workspaces||[]).map(w=>({id:w.name,label:w.name})),'所有工作區']])if($(id)){const chosen=$(id).value;$(id).replaceChildren(new Option(label,''),...values.map(v=>new Option(v.label,v.id)));$(id).value=values.some(v=>v.id===chosen)?chosen:'';}
       if (catalog.batches.some(b=>b.id===batch)) $('batch').value = batch; if ([...$('round').options].some(o=>o.value===round)) $('round').value = round;
     }
@@ -114,10 +119,10 @@
     $('load-more').hidden = catalog.paged?catalog.nextCursor===null:list.length <= shown.length; $('load-more').textContent = `載入更多 · 還有 ${catalog.paged?catalog.filteredCount-list.length:list.length - shown.length} 張`;
     $('export-favorites').disabled = catalog.paged?view!=='favorite'||!catalog.images.length:!catalog.images.some(i=>i.status==='favorite'&&baseFilter(i));
     if(catalog.paged)$('export-favorites').title='切到「喜歡的」後，匯出目前已載入的收藏。更多圖片請先載入下一頁。';
-    $('library-info').textContent = `共 ${catalog.total} 張圖片 · ${catalog.sourceCount} 個來源檔案`;
+    $('library-info').textContent = `共 ${catalog.total} 個媒體 · ${catalog.sourceCount} 個來源檔案`;
     renderSelection(); renderScan(catalog.scan); updateViewer(); updateCompare(); globalThis.GPT2WEBCategoryUI?.render(catalog,{selected:[...selected],viewerId,busy:busy||!!pendingOperation});
   }
-  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','device','workspace','media'])if($(id)?.value)p.set(id,$(id).value);globalThis.GPT2WEBCategoryUI?.query(p);return p;}
+  function query(){const p=new URLSearchParams({paged:'1',status:view,sort:$('sort').value});for(const id of ['batch','round','search','source','device','workspace','media'])if($(id)?.value)p.set(id,$(id).value);globalThis.GPT2WEBCategoryUI?.query(p);return p;}
   let loadedQuery='',loadingMore=false,filterTimer;
   function refresh(full = false) {
     if (refreshing) return full ? refreshing.catch(()=>{}).then(()=>refresh(true)) : refreshing;
@@ -171,9 +176,10 @@
     const list = images(), index = list.findIndex(i=>i.id===viewerId), source = image.sources[0];
     $('viewer-title').textContent = source.filename; $('viewer-position').textContent = `${index>=0?index+1:'—'} / ${list.length} · ${labels[image.status]}`;
     $('viewer-meta').textContent = `${source.batchLabel}${source.round?' · 第 '+source.round+' 輪':''} · ${image.width} × ${image.height} · ${bytes(image.bytes)}`;
-    const video=$('viewer-video'),isVideo=image.kind==='video';
-    if(video){video.hidden=!isVideo;$('viewer-image').hidden=isVideo;$('zoom').hidden=isVideo;if(!isVideo&&video.dataset.media){video.pause();video.removeAttribute('src');delete video.dataset.media;video.load();}if(!isVideo)$('video-error').hidden=true;}
-    const src = `/api/images/${image.id}/original`; if(isVideo&&video){if(video.dataset.media!==src){$('video-error').hidden=true;setImage(video,src);video.onerror=()=>$('video-error').hidden=false;}$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;}else if (($('viewer-image').dataset.media||$('viewer-image').getAttribute('src')) !== src) { setImage($('viewer-image'),src); $('viewer-image').alt = source.filename; $('image-scroll').scrollTo(0,0); }
+    const video=$('viewer-video'),audio=$('viewer-audio'),isVideo=image.kind==='video',isAudio=image.kind==='audio',isModel=image.kind==='model3d';
+    if(video){video.hidden=!isVideo;$('viewer-image').hidden=isVideo||isAudio||isModel;$('zoom').hidden=isVideo||isAudio||isModel;if(!isVideo&&video.dataset.media){video.pause();video.removeAttribute('src');delete video.dataset.media;video.load();}if(!isVideo)$('video-error').hidden=true;}
+    if(audio){audio.hidden=!isAudio;if(!isAudio&&audio.dataset.media){audio.pause();audio.removeAttribute('src');delete audio.dataset.media;audio.load();}}
+    const src = `/api/images/${image.id}/original`; if(isVideo&&video){if(video.dataset.media!==src){$('video-error').hidden=true;setImage(video,src);video.onerror=()=>$('video-error').hidden=false;}$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;}else if(isAudio&&audio){if(audio.dataset.media!==src){setImage(audio,src);audio.dataset.media=src;}$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;}else if(isModel){$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;}else if (($('viewer-image').dataset.media||$('viewer-image').getAttribute('src')) !== src) { setImage($('viewer-image'),src); $('viewer-image').alt = source.filename; $('image-scroll').scrollTo(0,0); }
     if(transport)transport.download($('viewer-download'),src+'?download=1');else $('viewer-download').href = src + '?download=1'; $('previous').disabled = index<=0; $('next').disabled = index<0||index>=list.length-1;
     $('viewer-actions').replaceChildren(...actions(image).children);
   }
@@ -182,7 +188,7 @@
     if (!$('compare').open) return;
     const list = [...selected].map(asset).filter(Boolean), key = JSON.stringify(list.map(i=>[i.id,i.status,busy,!!pendingOperation])); if (key===lastCompare) return; lastCompare=key;
     const fragment=document.createDocumentFragment();
-    for (const image of list.slice(0,4)) { const item=node('article','compare-item'), img=node(image.kind==='video'?'video':'img');if(image.kind==='video'){img.controls=true;img.preload='metadata';}setImage(img,`/api/images/${image.id}/original`);img.alt=image.sources[0].filename;item.append(img,node('p','',image.sources[0].filename),actions(image));fragment.append(item); }
+    for (const image of list.slice(0,4)) { const item=node('article','compare-item'), tag=image.kind==='video'?'video':image.kind==='audio'?'audio':'img'; const img=node(tag);if(image.kind==='video'||image.kind==='audio'){img.controls=true;img.preload='metadata';}if(image.kind==='model3d'){img.className='media-placeholder';img.textContent='◇ 3D 模型';}else setImage(img,`/api/images/${image.id}/original`);img.alt=image.sources[0].filename;item.append(img,node('p','',image.sources[0].filename),actions(image));fragment.append(item); }
     $('compare-grid').replaceChildren(fragment);
   }
   async function exportImages(ids) {
@@ -207,7 +213,7 @@
   }
   const filterChanged=()=>{page=1;selected.clear();if(catalog?.paged)void refresh(true).catch(error=>toast(error.message));else render();};
   $('views').onclick=event=>{const button=event.target.closest('button[data-view]');if(button){view=button.dataset.view;filterChanged();}};
-  for(const id of ['search','batch','round','sort','device','workspace','media'])$(id)?.addEventListener(id==='search'?'input':'change',()=>{clearTimeout(filterTimer);if(id==='search')filterTimer=setTimeout(filterChanged,250);else filterChanged();});
+  for(const id of ['search','batch','round','sort','source','device','workspace','media'])$(id)?.addEventListener(id==='search'?'input':'change',()=>{clearTimeout(filterTimer);if(id==='search')filterTimer=setTimeout(filterChanged,250);else filterChanged();});
   $('select-all').onchange=()=>{if($('select-all').checked){const list=images();selected=new Set(list.slice(0,500).map(i=>i.id));if(list.length>500)toast('已選前 500 張，可分批整理。');}else selected.clear();lastGrid='';render();};
   $('deselect').onclick=()=>{selected.clear();lastGrid='';render();};
   $('load-more').onclick=async()=>{
@@ -222,7 +228,7 @@
   $('scan').onclick=async()=>{try{if(!catalog?.cloud)await api('/api/scan',{});await refresh(true);toast(catalog?.cloud?'已更新雲端成果；尚未上傳的檔案請在外掛查看同步狀態。':'開始檢查新圖片，已保存的分類會保留。');}catch(error){toast(error.message);}};
   $('previous').onclick=()=>navigate(-1);$('next').onclick=()=>navigate(1);
   $('zoom').onclick=()=>{zoomed=!zoomed;$('image-scroll').classList.toggle('is-zoomed',zoomed);$('zoom').setAttribute('aria-pressed',String(zoomed));};
-  $('viewer').addEventListener('close',()=>{const video=$('viewer-video');if(video){video.pause();video.removeAttribute('src');delete video.dataset.media;video.load();}viewerId=null;$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;});
+  $('viewer').addEventListener('close',()=>{const video=$('viewer-video'),audio=$('viewer-audio');if(video){video.pause();video.removeAttribute('src');delete video.dataset.media;video.load();}if(audio){audio.pause();audio.removeAttribute('src');delete audio.dataset.media;audio.load();}viewerId=null;$('viewer-image').removeAttribute('src');delete $('viewer-image').dataset.media;});
   $('compare').addEventListener('close',()=>{const visible=new Set(images().map(i=>i.id));selected=new Set([...selected].filter(id=>visible.has(id)));lastGrid='';render();});
   document.addEventListener('keydown',event=>{if(!$('viewer').open||event.repeat||event.ctrlKey||event.metaKey||event.altKey||event.target.matches('input,textarea,select,video,[contenteditable=true]')||[...document.querySelectorAll('dialog[open]')].at(-1)!==$('viewer'))return;
     if(['ArrowLeft','ArrowRight','f','a','u'].includes(event.key.toLowerCase())||['ArrowLeft','ArrowRight'].includes(event.key))event.preventDefault();

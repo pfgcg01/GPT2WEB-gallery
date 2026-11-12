@@ -6,7 +6,7 @@
       model: ["模型", 120],
       notes: ["備註", 2000],
     },
-    MAX = 40 * 1024 * 1024,
+    MAX = 50 * 1024 * 1024,
     LIMIT = 512 * 1024 * 1024;
   const ui = () => globalThis.GPT2WEBGalleryUI,
     transfer = () => globalThis.GPT2WEBUploadTransfer;
@@ -121,7 +121,7 @@
         picture.append(img);
       } else
         picture.append(
-          el("span", item.mime?.startsWith("video/") ? "▶ 影片" : "✓"),
+          el("span", item.mime?.startsWith("video/") ? "▶ 影片" : item.mime?.startsWith("audio/") ? "♫ 音訊" : item.mime?.startsWith("model/") ? "◇ 3D" : "✓"),
         );
       const body = el("div", undefined, "upload-item-body"),
         title = el("h3", item.filename),
@@ -242,7 +242,7 @@
           continue;
         }
         if (!file.size || file.size > MAX) {
-          problems.push(file.name + "：單檔需為 1 byte–40 MiB");
+          problems.push(file.name + "：單檔需為 1 byte–50 MiB");
           continue;
         }
         if (
@@ -297,7 +297,7 @@
     header.append(heading, close);
     const note = el(
       "p",
-      "一次選取多張圖片、GIF 或影片，共用填寫資料，也可逐一調整。所有欄位皆可留空；填寫 Prompt 才會自動預分類。原始檔案保存到現有公開 GEN-IMG 儲存庫，Prompt 等資料保存在私人圖庫。",
+      "一次選取多張圖片、GIF、影片、音訊或 3D 檔案，共用填寫資料，也可逐一調整。所有欄位皆可留空；填寫 Prompt 才會自動預分類。原始檔案保存到現有公開 GEN-IMG 儲存庫，Prompt 等資料保存在私人圖庫。",
       "upload-note",
     );
     const drop = el("div", undefined, "upload-dropzone"),
@@ -306,7 +306,7 @@
     picker.id = "upload-files";
     picker.type = "file";
     picker.multiple = true;
-    picker.accept = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm";
+    picker.accept = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.wav,.mp3,.fbx,.glb,.gltf";
     picker.hidden = true;
     chooseButton.onclick = () => {
       if (!running && !adding) picker.click();
@@ -320,7 +320,7 @@
       picker,
       el(
         "p",
-        "或將檔案拖曳到這裡。支援 PNG、JPG、WebP、GIF、MP4、WebM；單檔最多 40 MiB。影片能否播放取決於瀏覽器支援的編碼。",
+        "或將檔案拖曳到這裡。支援 PNG、JPG、WebP、GIF、MP4、WebM、WAV、MP3、FBX、GLB、GLTF；單檔最多 50 MiB。影片能否播放取決於瀏覽器支援的編碼。",
       ),
     );
     drop.ondragover = (e) => e.preventDefault();
@@ -526,7 +526,7 @@
                 hash,
                 bytes: item.file.size,
                 mime: item.mime,
-                kind: item.mime.startsWith("video/") ? "video" : "image",
+                kind: item.mime.startsWith("video/") ? "video" : item.mime.startsWith("audio/") ? "audio" : (item.mime.startsWith("model/") || item.filename.toLowerCase().endsWith(".fbx")) ? "model3d" : "image",
                 metadata,
               },
             });
