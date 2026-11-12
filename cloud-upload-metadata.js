@@ -98,6 +98,8 @@
       const trimmed = line.trim();
       const heading = trimmed.match(/^#{1,6}\s*(?:\[(.+)\]|(.+))\s*$/u);
       if (heading && start(heading[1] || heading[2])) continue;
+      const bracket = trimmed.match(/^\[(.+)\]$/u);
+      if (bracket && start(bracket[1])) continue;
       const explicit = trimmed.match(/^(?:檔名|filename|file|檔案)\s*[:：]\s*(.+)$/iu);
       if (explicit && start(explicit[1])) continue;
       const tagged = field(line);
@@ -126,7 +128,7 @@
     const file = basename(path);
     const source = normalize(item.source || sourceOf(path));
     const candidates = [normalize(entry.key), normalize(entry.filename)].filter(Boolean);
-    const exact = candidates.some((key) => key === path || key === file);
+    const exact = candidates.some((key) => key === path || key === file || basename(key) === file);
     const numeric = candidates.some((key) => key === numberKey(file) || key === numberKey(path));
     if (!exact && !numeric) return false;
     if (entry.source && source && normalize(entry.source) !== source) return false;
