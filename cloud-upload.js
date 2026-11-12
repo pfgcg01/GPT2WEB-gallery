@@ -28,8 +28,11 @@
     batchName,
     db,
     items = [],
+    metadataEntries = [],
+    metadataWarnings = [],
     libraryId,
     batch,
+    metadataStatus,
     running = false,
     adding = false,
     pausing = false;
@@ -231,7 +234,13 @@
     counts();
     const problems = [];
     try {
-      for (const file of files) {
+      const metadata = files.filter(isMetadataFile),
+        media = files.filter((file) => !isMetadataFile(file));
+      if (metadata.length) {
+        metadataWarnings = [];
+        await readMetadata(metadata);
+      }
+      for (const file of media) {
         const extension = file.name.split(".").at(-1).toLowerCase(),
           mime =
             Object.keys(transfer().extensions).find(
@@ -253,14 +262,16 @@
           problems.push("已達 100 個檔案或 512 MiB 待傳上限，請先完成這批。");
           break;
         }
-        const item = {
+        const inferred = inferredFields(file),
+          item = {
           id: crypto.randomUUID(),
           libraryId,
           filename: file.name,
+          relativePath: relativeName(file),
           file,
           mime,
-          fields: {},
-          custom: false,
+          fields: inferred.fields,
+          custom: inferred.custom,
           state: "queued",
           addedAt: Date.now(),
         };
@@ -278,6 +289,54 @@
   }
   function message(text) {
     dialog.querySelector(".upload-message").textContent = text;
+  }
+  const isMetadataFile = (file) => /\.(?:txt|md|json)$/iu.test(file.name);
+  const relativeName = (file) => file.webkitRelativePath || file.name;
+  function inferredFields(file) {
+    const relative = relativeName(file),
+      source = globalThis.GPT2WEBUploadMetadata.sourceOf(relative),
+      item = { filename: file.name, relativePath: relative, source },
+      matches = metadataEntries.filter((entry) =>
+        globalThis.GPT2WEBUploadMetadata.match(entry, item),
+      );
+    if (matches.length > 1) {
+      metadataWarnings.push(`${file.name}：找到多筆編號資料，未自動套用`);
+      return { fields: source ? { source } : {}, custom: !!source };
+    }
+    const match = matches[0],
+      fields = {
+        ...(source ? { source } : {}),
+        ...(match?.source ? { source: match.source } : {}),
+        ...(match?.model ? { model: match.model } : {}),
+        ...(match?.prompt ? { prompt: match.prompt } : {}),
+        ...(match?.notes ? { notes: match.notes } : {}),
+      };
+    return { fields, custom: Object.keys(fields).length > 0 };
+  }
+  async function readMetadata(files) {
+    if (!files.length) return;
+    const parsed = [];
+    for (const file of files) {
+      try {
+        const result = globalThis.GPT2WEBUploadMetadata.parse(
+          await file.text(),
+          file.name,
+        );
+        parsed.push(...result.entries);
+        metadataWarnings.push(...result.warnings);
+      } catch (error) {
+        metadataWarnings.push(`${file.name}：${error.message}`);
+      }
+    }
+    metadataEntries = parsed;
+    for (const item of items) {
+      if (item.spec || !item.file) continue;
+      const inferred = inferredFields(item.file);
+      await update(item, { fields: inferred.fields, custom: inferred.custom });
+    }
+    metadataStatus.textContent = `已解析 ${metadataEntries.length} 筆對照資料`;
+    if (metadataWarnings.length)
+      metadataStatus.textContent += `；${metadataWarnings.length} 個提示請檢查`;
   }
   function init() {
     if (dialog) return;
@@ -301,12 +360,12 @@
       "upload-note",
     );
     const drop = el("div", undefined, "upload-dropzone"),
-      chooseButton = el("button", "選擇多個檔案", "secondary");
+      chooseButton = el("button", "選擇檔案與 TXT", "secondary");
     picker = el("input");
     picker.id = "upload-files";
     picker.type = "file";
     picker.multiple = true;
-    picker.accept = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.wav,.mp3,.fbx,.glb,.gltf";
+    picker.accept = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.wav,.mp3,.fbx,.glb,.gltf,.txt,.md,.json";
     picker.hidden = true;
     chooseButton.onclick = () => {
       if (!running && !adding) picker.click();
@@ -320,9 +379,12 @@
       picker,
       el(
         "p",
-        "或將檔案拖曳到這裡。支援 PNG、JPG、WebP、GIF、MP4、WebM、WAV、MP3、FBX、GLB、GLTF；單檔最多 50 MiB。影片能否播放取決於瀏覽器支援的編碼。",
+        "可同時選取編號媒體與 metadata.txt／紀錄.md／JSON；TXT 會依檔名或編號套用模型與 Prompt。也可將檔案拖曳到這裡。媒體支援 PNG、JPG、WebP、GIF、MP4、WebM、WAV、MP3、FBX、GLB、GLTF；單檔最多 50 MiB。",
       ),
     );
+    metadataStatus = el("p", "尚未載入 TXT 對照資料", "upload-metadata-status");
+    metadataStatus.setAttribute("role", "status");
+    drop.append(metadataStatus);
     drop.ondragover = (e) => e.preventDefault();
     drop.ondrop = (e) => {
       e.preventDefault();
@@ -384,6 +446,9 @@
         }
         items = items.filter((i) => i.state !== "done");
         if (!items.length) {
+          metadataEntries = [];
+          metadataWarnings = [];
+          metadataStatus.textContent = "尚未載入 TXT 對照資料";
           batch = {
             libraryId,
             id: crypto.randomUUID(),
@@ -499,7 +564,7 @@
                 batch.name ||
                 "手動上傳 · " + new Date(batch.startedAt).toLocaleString(),
               filename: item.filename,
-              relative: item.filename,
+              relative: item.relativePath || item.filename,
               index: items.indexOf(item) + 1,
               startedAt: batch.startedAt,
               uploadOrigin: "website",
