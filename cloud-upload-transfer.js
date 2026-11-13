@@ -45,6 +45,60 @@
       });
     return result;
   }
+  async function mp4Dimensions(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer()),
+      view = new DataView(bytes.buffer),
+      text = new TextDecoder("ascii");
+    let width = 0,
+      height = 0,
+      ftyp = false,
+      mdat = false,
+      boxes = 0;
+    function walk(start, end, depth = 0) {
+      if (depth > 5) throw Error("MP4 結構過深");
+      for (let at = start; at < end; ) {
+        if (++boxes > 10000 || at + 8 > end) throw Error("MP4 結構不完整");
+        let size = view.getUint32(at),
+          header = 8;
+        const type = text.decode(bytes.subarray(at + 4, at + 8));
+        if (size === 1) {
+          if (at + 16 > end) throw Error("MP4 結構不完整");
+          size = Number(view.getBigUint64(at + 8));
+          header = 16;
+        }
+        if (size === 0) size = end - at;
+        if (!Number.isSafeInteger(size) || size < header || at + size > end)
+          throw Error("MP4 長度不正確");
+        if (type === "ftyp") ftyp = true;
+        if (type === "mdat" && size > header) mdat = true;
+        if (["moov", "trak"].includes(type))
+          walk(at + header, at + size, depth + 1);
+        if (type === "tkhd" && size >= header + 84) {
+          const w = view.getUint32(at + size - 8) / 65536,
+            h = view.getUint32(at + size - 4) / 65536;
+          if (Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0) {
+            width = w;
+            height = h;
+          }
+        }
+        at += size;
+      }
+    }
+    try {
+      walk(0, bytes.length);
+      return ftyp &&
+        mdat &&
+        width &&
+        height &&
+        width <= 32768 &&
+        height <= 32768 &&
+        width * height <= 80000000
+        ? { width, height }
+        : null;
+    } catch {
+      return null;
+    }
+  }
   async function preview(file, mime) {
     const url = URL.createObjectURL(file),
       video = mime.startsWith("video/"),
@@ -52,7 +106,8 @@
     const canvas = document.createElement("canvas");
     let width = 960,
       height = 540,
-      decoded = false;
+      decoded = false,
+      warning = "";
     try {
       await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(Error("讀取預覽逾時")), 15000);
@@ -86,11 +141,19 @@
         media.removeAttribute("src");
         media.load();
       }
-      throw Error(
-        video
-          ? "此瀏覽器無法讀取影片預覽；請使用相容的 MP4（H.264）或 WebM 檔案。"
-          : error.message,
-      );
+      const dimensions =
+        video && mime === "video/mp4" ? await mp4Dimensions(file) : null;
+      if (dimensions) {
+        width = dimensions.width;
+        height = dimensions.height;
+        warning =
+          "此瀏覽器無法解碼影片預覽，已使用通用縮圖；原始檔案保留，可下載後播放。";
+      } else
+        throw Error(
+          video
+            ? "此瀏覽器無法讀取影片預覽；請使用相容的 MP4（H.264）或 WebM 檔案。"
+            : error.message,
+        );
     }
     try {
       const scale = Math.min(1, 640 / width, 640 / height);
@@ -114,7 +177,7 @@
         canvas.toBlob(resolve, "image/jpeg", 0.8),
       );
       if (!blob || blob.size > 256 * 1024) throw Error("無法建立媒體預覽。");
-      return { blob, width, height };
+      return { blob, width, height, warning };
     } finally {
       if (video) {
         media.pause();
@@ -300,5 +363,11 @@
         throw Error("原檔仍在核對，尚未標記成功。");
     }
   }
-  globalThis.GPT2WEBUploadTransfer = { extensions, digest, preview, transfer };
+  globalThis.GPT2WEBUploadTransfer = {
+    extensions,
+    digest,
+    preview,
+    transfer,
+    mp4Dimensions,
+  };
 })();

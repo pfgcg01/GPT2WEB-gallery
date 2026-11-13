@@ -70,7 +70,12 @@
         ) &&
         !u.search &&
         !u.hash;
-      if (u.username || u.password || (!supabase && !github))
+      const privateReport =
+        u.origin === config.uploadOrigin &&
+        /^\/reports\/[a-f0-9]{64}\.(?:html|md|txt)$/u.test(u.pathname) &&
+        u.searchParams.has("token") &&
+        !u.hash;
+      if (u.username || u.password || (!supabase && !github && !privateReport))
         throw Error("圖片來源不正確。");
       return u.href;
     })();
@@ -116,7 +121,9 @@
       try {
         const a = document.createElement("a");
         const source = await mediaUrl(route);
-        if (new URL(source).origin === base.origin) {
+        if (
+          [base.origin, config.uploadOrigin].includes(new URL(source).origin)
+        ) {
           // Supabase supplies Content-Disposition, including HTML/Markdown
           // report names. Preserve that download behavior for private files.
           a.href = source;
@@ -153,7 +160,7 @@
           route.split("/")[3].slice(0, 12) +
           "." +
           (new URL(source).pathname.match(
-            /\.(png|jpg|webp|gif|mp4|webm)$/u,
+            /\.(png|jpg|webp|gif|mp4|webm|wav|mp3|glb|gltf|fbx|bin)$/u,
           )?.[1] || "png");
         document.body.append(a);
         a.click();

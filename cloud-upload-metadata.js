@@ -22,11 +22,13 @@
       .trim()
       .replaceAll("\\", "/")
       .split("/");
-    return path.length > 1 ? path[0].trim() : "";
+    return path.length > 1
+      ? providerHint(path.at(-2) + ".txt") || path[0].trim()
+      : "";
   };
   const field = (line) => {
     const match = line.match(
-      /^\s*(?:[-*]\s*)?(模型|model|來源|source|提示詞|prompt|備註|notes?)\s*[:：]\s*(.*)$/iu,
+      /^\s*(?:[-*]\s*)?(模型|model|來源|source|服務商|provider|提示詞|prompt|備註|notes?)\s*[:：]\s*(.*)$/iu,
     );
     if (!match) return null;
     const names = {
@@ -34,6 +36,8 @@
       model: "model",
       來源: "source",
       source: "source",
+      服務商: "source",
+      provider: "source",
       提示詞: "prompt",
       prompt: "prompt",
       備註: "notes",
@@ -74,7 +78,7 @@
       file =
         data.filename || data.file || data.path || data.name || fallbackKey;
     const ref = reference(String(file));
-    const key = normalize(file) || ref?.key || normalize(fallbackKey);
+    const key = ref?.key || normalize(file) || normalize(fallbackKey);
     if (!key) return null;
     return {
       key,
@@ -92,6 +96,11 @@
     } catch {
       return { entries: [], warnings: [`${name}：JSON 格式無法解析`] };
     }
+    if (!value || typeof value !== "object")
+      return {
+        entries: [],
+        warnings: [`${name}：JSON 需要檔案對照表或陣列。`],
+      };
     const rows = Array.isArray(value)
       ? value.map((item) => ["", item])
       : Array.isArray(value.files)
@@ -105,43 +114,99 @@
       warnings: entries.length ? [] : [`${name}：沒有找到檔案對照資料`],
     };
   }
+  function providerHint(name) {
+    let value = String(name || "")
+      .replaceAll("\\", "/")
+      .split("/")
+      .at(-1)
+      .replace(/\.[^.]+$/u, "");
+    if (!/^\d{1,4}[.]\d{1,2}[-_]/u.test(value)) return "";
+    return value
+      .replace(/^\d{1,4}[.]\d{1,2}[-_]/u, "")
+      .replace(/[_ -](?:紀錄|記錄|记录|record|metadata)$/iu, "")
+      .replace(/_\d+$/u, "")
+      .trim();
+  }
   function parseText(raw, name) {
     const lines = String(raw || "")
+      .replace(/^\uFEFF/u, "")
       .replace(/\r\n?/gu, "\n")
       .split("\n");
-    const entries = [];
-    let current = null;
-    let mode = "";
+    const records = new Map(),
+      warnings = [];
+    let current = null,
+      mode = "";
+    const defaultSource = providerHint(name);
     const save = () => {
       if (!current) return;
-      current.prompt = text(current.prompt, 8000);
-      current.model = text(current.model, 120);
-      current.source = text(current.source, 500);
-      current.notes = text(current.notes, 2000);
-      if (
-        current.key &&
-        (current.model || current.prompt || current.source || current.notes)
-      )
-        entries.push(current);
+      for (const ref of current.refs) {
+        const entry = {
+          key: ref.key,
+          filename: ref.filename || "",
+          source: text(current.source || defaultSource, 500),
+          model: text(current.model || ref.model, 120),
+          prompt: text(current.prompt),
+          notes: text(current.notes, 2000),
+        };
+        if (!entry.model && !entry.prompt && !entry.notes && !entry.source)
+          continue;
+        const key = normalize(entry.source) + "|" + entry.key;
+        const old = records.get(key);
+        const conflicts =
+          old &&
+          ["model", "prompt", "notes"].some(
+            (k) => old[k] && entry[k] && old[k] !== entry[k],
+          );
+        if (conflicts) {
+          warnings.push(
+            `${name}：編號 ${entry.key} 有不同的模型或 Prompt，請檢查後自行調整。`,
+          );
+          records.set(key + "#" + records.size, entry);
+        } else
+          records.set(
+            key,
+            old
+              ? Object.fromEntries(
+                  Object.keys(entry).map((k) => [k, entry[k] || old[k]]),
+                )
+              : entry,
+          );
+      }
       current = null;
       mode = "";
     };
     const start = (value) => {
-      const ref = reference(value);
-      if (!ref) return false;
+      const range = value.match(
+        /^(\d{1,4})\s*(?:~|～|–|—|-|至|到)\s*(\d{1,4})(?:\s*(?:共用\s*)?(?:Prompt|提示詞)[^:：]*)?[:：]?\s*$/iu,
+      );
+      let refs;
+      if (range) {
+        const first = Number(range[1]),
+          last = Number(range[2]);
+        if (last < first || last - first > 999) {
+          warnings.push(`${name}：編號範圍 ${value} 無效。`);
+          return false;
+        }
+        refs = Array.from({ length: last - first + 1 }, (_, i) => ({
+          key: String(first + i),
+          model: "",
+        }));
+      } else {
+        const ref = reference(value);
+        if (!ref) return false;
+        refs = [ref];
+      }
       save();
-      current = {
-        key: ref.key,
-        filename: ref.filename || "",
-        source: "",
-        model: ref.model || "",
-        prompt: "",
-        notes: "",
-      };
+      current = { refs, source: "", model: "", prompt: "", notes: "" };
+      mode = "prompt";
       return true;
     };
     for (const line of lines) {
       const trimmed = line.trim();
+      if (/^[-*_]{3,}$/u.test(trimmed)) {
+        save();
+        continue;
+      }
       const heading = trimmed.match(/^#{1,6}\s*(?:\[(.+)\]|(.+))\s*$/u);
       if (heading && start(heading[1] || heading[2])) continue;
       const bracket = trimmed.match(/^\[(.+)\]$/u);
@@ -150,6 +215,13 @@
         /^(?:檔名|filename|file|檔案)\s*[:：]\s*(.+)$/iu,
       );
       if (explicit && start(explicit[1])) continue;
+      if (
+        /^(?:\d{1,4}(?:\s*(?:~|～|–|—|-|至|到)\s*\d{1,4})(?:\s*(?:共用\s*)?(?:Prompt|提示詞)[^:：]*)?[:：]?|\d{1,4}(?:[ ._-]+[A-Za-z][A-Za-z0-9_./+()-]*(?: [A-Za-z0-9_./+()-]+)*)?[:：]?)$/iu.test(
+          trimmed,
+        ) &&
+        start(trimmed.replace(/[:：]$/u, ""))
+      )
+        continue;
       const tagged = field(line);
       if (tagged) {
         if (!current) continue;
@@ -158,20 +230,18 @@
         continue;
       }
       if (!current) continue;
-      if (mode === "prompt")
-        current.prompt += (current.prompt ? "\n" : "") + line;
-      else if (mode === "notes")
-        current.notes += (current.notes ? "\n" : "") + line;
+      if (mode === "prompt" || mode === "notes")
+        current[mode] += (current[mode] ? "\n" : "") + line;
     }
     save();
-    const warnings = entries.length
-      ? []
-      : [`${name}：沒有找到可套用的檔案區段`];
+    const entries = [...records.values()];
+    if (!entries.length)
+      warnings.push(`${name}：沒有找到可套用的編號或檔名區段。`);
     return { entries, warnings };
   }
   function parse(raw, name = "metadata") {
     const value = String(raw || "");
-    return /^\s*[\[{]/u.test(value) && /[}\]]\s*$/u.test(value)
+    return /\.json$/iu.test(name) || /^\s*(?:\{|\[\s*(?:\{|\]))/u.test(value)
       ? parseJson(value, name)
       : parseText(value, name);
   }
@@ -193,5 +263,11 @@
       return false;
     return true;
   }
-  globalThis.GPT2WEBUploadMetadata = { parse, match, sourceOf, numberKey };
+  globalThis.GPT2WEBUploadMetadata = {
+    parse,
+    match,
+    sourceOf,
+    numberKey,
+    providerHint,
+  };
 })();

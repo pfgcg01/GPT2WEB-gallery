@@ -23,16 +23,21 @@
     pause,
     clear,
     picker,
+    metadataPicker,
+    folderPicker,
+    selectionButtons = [],
     common,
     commonFields = {},
     batchName,
     db,
     items = [],
     metadataEntries = [],
+    metadataFiles = [],
     metadataWarnings = [],
     libraryId,
     batch,
     metadataStatus,
+    metadataMessages,
     running = false,
     adding = false,
     pausing = false;
@@ -101,9 +106,25 @@
       : "開始批次上傳";
     pause.hidden = !running;
     pause.disabled = pausing;
-    clear.disabled = running || adding || !items.length;
+    clear.disabled =
+      running || adding || (!items.length && !metadataFiles.length);
     picker.disabled = running || adding;
+    for (const input of [metadataPicker, folderPicker])
+      if (input) input.disabled = running || adding;
+    for (const button of selectionButtons) button.disabled = running || adding;
     common.disabled = running || adding;
+    if (metadataStatus) {
+      const matched = items.filter((i) => i.metadataMatched).length;
+      metadataStatus.textContent = metadataFiles.length
+        ? `已載入 ${metadataFiles.length} 份對照檔 · 解析 ${metadataEntries.length} 筆 · 已套用 ${matched}／${items.length} 個媒體`
+        : "尚未載入 TXT 對照資料";
+      if (metadataWarnings.length)
+        metadataStatus.textContent += " · 有提示，請查看下方說明";
+      metadataMessages?.replaceChildren(
+        ...[...new Set(metadataWarnings)].map((w) => el("li", w)),
+      );
+      if (metadataMessages) metadataMessages.hidden = !metadataWarnings.length;
+    }
     // Rows created while adding are disabled until the selection is committed.
     // Refresh every row when the queue returns to idle or begins uploading.
     for (const item of items) renderItem(item);
@@ -159,6 +180,7 @@
             try {
               await update(item, {
                 fields: { ...item.fields, [field]: value },
+                fieldsEdited: true,
               });
             } catch (e) {
               ui().toast(e.message);
@@ -171,7 +193,7 @@
       }
       toggle.onchange = async () => {
         try {
-          await update(item, { custom: toggle.checked });
+          await update(item, { custom: toggle.checked, fieldsEdited: true });
         } catch (e) {
           ui().toast(e.message);
           toggle.checked = item.custom;
@@ -226,7 +248,19 @@
         ? 1
         : (item.uploadedBytes || 0) /
           (item.spec?.bytes || item.file?.size || 1);
+    if (item.previewWarning)
+      p.status.textContent += " · " + item.previewWarning;
     p.custom.hidden = !item.custom;
+    for (const [field, input] of Object.entries(p.fields))
+      if (document.activeElement !== input)
+        input.value = item.fields?.[field] || "";
+    if (item.state === "queued" && item.metadataMatched)
+      p.status.textContent +=
+        " · 已套用 TXT" +
+        (item.fields?.model ? " · " + item.fields.model : "") +
+        (item.fields?.prompt
+          ? " · Prompt " + item.fields.prompt.length + " 字"
+          : "");
     p.toggle.disabled = running || !!item.spec;
     p.custom.disabled = running || !!item.spec;
     p.remove.disabled = running || adding;
@@ -281,6 +315,7 @@
             mime,
             fields: inferred.fields,
             custom: inferred.custom,
+            metadataMatched: inferred.metadataMatched,
             state: "queued",
             addedAt: Date.now(),
           };
@@ -294,15 +329,20 @@
       adding = false;
       counts();
     }
-    if (problems.length) message(problems.join("\n"));
+    if (problems.length || metadataWarnings.length)
+      message([...problems, ...new Set(metadataWarnings)].join("\n"));
+    else if (files.some(isMetadataFile))
+      message(
+        "對照檔已讀取；請展開「個別資料與調整」確認模型及 Prompt，再開始上傳。",
+      );
   }
   function message(text) {
     dialog.querySelector(".upload-message").textContent = text;
   }
   const isMetadataFile = (file) => /\.(?:txt|md|json)$/iu.test(file.name);
   const relativeName = (file) => file.webkitRelativePath || file.name;
-  function inferredFields(file) {
-    const relative = relativeName(file),
+  function inferredFields(file, savedRelative) {
+    const relative = savedRelative || relativeName(file),
       source = globalThis.GPT2WEBUploadMetadata.sourceOf(relative),
       item = { filename: file.name, relativePath: relative, source },
       matches = metadataEntries.filter((entry) =>
@@ -310,7 +350,11 @@
       );
     if (matches.length > 1) {
       metadataWarnings.push(`${file.name}：找到多筆編號資料，未自動套用`);
-      return { fields: source ? { source } : {}, custom: !!source };
+      return {
+        fields: source ? { source } : {},
+        custom: !!source,
+        metadataMatched: false,
+      };
     }
     const match = matches[0],
       fields = {
@@ -320,32 +364,57 @@
         ...(match?.prompt ? { prompt: match.prompt } : {}),
         ...(match?.notes ? { notes: match.notes } : {}),
       };
-    return { fields, custom: Object.keys(fields).length > 0 };
+    return {
+      fields,
+      custom: Object.keys(fields).length > 0,
+      metadataMatched: !!match,
+    };
   }
   async function readMetadata(files) {
     if (!files.length) return;
-    const parsed = [];
     for (const file of files) {
       try {
+        if (file.size > 5 * 1024 * 1024)
+          throw Error("對照檔超過 5 MiB，請拆成較小的批次。");
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const encoding =
+          bytes[0] === 255 && bytes[1] === 254
+            ? "utf-16le"
+            : bytes[0] === 254 && bytes[1] === 255
+              ? "utf-16be"
+              : "utf-8";
         const result = globalThis.GPT2WEBUploadMetadata.parse(
-          await file.text(),
+          new TextDecoder(encoding, { fatal: true }).decode(bytes),
           file.name,
         );
-        parsed.push(...result.entries);
-        metadataWarnings.push(...result.warnings);
+        const key = relativeName(file);
+        const saved = {
+          key,
+          name: file.name,
+          entries: result.entries,
+          warnings: result.warnings,
+        };
+        const index = metadataFiles.findIndex((f) => f.key === key);
+        if (index >= 0) metadataFiles[index] = saved;
+        else metadataFiles.push(saved);
       } catch (error) {
         metadataWarnings.push(`${file.name}：${error.message}`);
       }
     }
-    metadataEntries = parsed;
+    metadataEntries = metadataFiles.flatMap((f) => f.entries);
+    metadataWarnings.push(...metadataFiles.flatMap((f) => f.warnings));
+    batch.metadataFiles = metadataFiles;
+    await store("batches", batch);
     for (const item of items) {
-      if (item.spec || !item.file) continue;
-      const inferred = inferredFields(item.file);
-      await update(item, { fields: inferred.fields, custom: inferred.custom });
+      if (item.spec || !item.file || item.fieldsEdited) continue;
+      const inferred = inferredFields(item.file, item.relativePath);
+      await update(item, {
+        fields: inferred.fields,
+        custom: inferred.custom,
+        metadataMatched: inferred.metadataMatched,
+      });
     }
-    metadataStatus.textContent = `已解析 ${metadataEntries.length} 筆對照資料`;
-    if (metadataWarnings.length)
-      metadataStatus.textContent += `；${metadataWarnings.length} 個提示請檢查`;
+    counts();
   }
   function init() {
     if (dialog) return;
@@ -392,9 +461,48 @@
         "可同時選取編號媒體與 metadata.txt／紀錄.md／JSON；TXT 會依檔名或編號套用模型與 Prompt。也可將檔案拖曳到這裡。媒體支援 PNG、JPG、WebP、GIF、MP4、WebM、WAV、MP3、FBX、GLB、GLTF；單檔最多 50 MiB。",
       ),
     );
+    const metadataButton = el(
+      "button",
+      "載入 TXT／MD／JSON 對照檔",
+      "secondary",
+    );
+    metadataPicker = el("input");
+    metadataPicker.id = "upload-metadata-files";
+    metadataPicker.type = "file";
+    metadataPicker.multiple = true;
+    metadataPicker.accept =
+      ".txt,.md,.json,text/plain,text/markdown,application/json";
+    metadataPicker.hidden = true;
+    metadataButton.onclick = () => {
+      if (!running && !adding) metadataPicker.click();
+    };
+    metadataPicker.onchange = () => {
+      void choose([...metadataPicker.files]);
+      metadataPicker.value = "";
+    };
+    const folderButton = el("button", "加入整個資料夾", "secondary");
+    folderPicker = el("input");
+    folderPicker.id = "upload-folder";
+    folderPicker.type = "file";
+    folderPicker.webkitdirectory = true;
+    folderPicker.multiple = true;
+    folderPicker.hidden = true;
+    folderButton.onclick = () => {
+      if (!running && !adding) folderPicker.click();
+    };
+    folderPicker.onchange = () => {
+      void choose([...folderPicker.files]);
+      folderPicker.value = "";
+    };
+    selectionButtons = [chooseButton, metadataButton, folderButton];
+    drop.prepend(metadataButton, metadataPicker, folderButton, folderPicker);
     metadataStatus = el("p", "尚未載入 TXT 對照資料", "upload-metadata-status");
     metadataStatus.setAttribute("role", "status");
     drop.append(metadataStatus);
+    metadataMessages = el("ul");
+    metadataMessages.hidden = true;
+    metadataMessages.className = "upload-metadata-warnings";
+    drop.append(metadataMessages);
     drop.ondragover = (e) => e.preventDefault();
     drop.ondrop = (e) => {
       e.preventDefault();
@@ -457,6 +565,7 @@
         items = items.filter((i) => i.state !== "done");
         if (!items.length) {
           metadataEntries = [];
+          metadataFiles = [];
           metadataWarnings = [];
           metadataStatus.textContent = "尚未載入 TXT 對照資料";
           batch = {
@@ -526,6 +635,9 @@
           fields: {},
         };
         batchName.value = batch.name;
+        metadataFiles = batch.metadataFiles || [];
+        metadataEntries = metadataFiles.flatMap((f) => f.entries);
+        metadataWarnings = metadataFiles.flatMap((f) => f.warnings || []);
         for (const [key, input] of Object.entries(commonFields))
           input.value = batch.fields[key] || "";
         for (const item of items) {
@@ -580,13 +692,15 @@
               uploadOrigin: "website",
               ...fields,
             };
-            let preview;
+            let preview,
+              previewWarning = "";
             if (
               item.mime.startsWith("image/") ||
               item.mime.startsWith("video/")
             ) {
               const poster = await transfer().preview(item.file, item.mime);
               preview = poster.blob;
+              previewWarning = poster.warning || "";
               Object.assign(metadata, {
                 previewHash: await transfer().digest(
                   await preview.arrayBuffer(),
@@ -597,6 +711,7 @@
             }
             await update(item, {
               preview,
+              previewWarning,
               spec: {
                 id: await transfer().digest(
                   new TextEncoder().encode("website:" + item.id),
