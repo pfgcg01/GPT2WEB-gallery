@@ -25,26 +25,54 @@
     return path.length > 1 ? path[0].trim() : "";
   };
   const field = (line) => {
-    const match = line.match(/^\s*(?:[-*]\s*)?(模型|model|來源|source|提示詞|prompt|備註|notes?)\s*[:：]\s*(.*)$/iu);
+    const match = line.match(
+      /^\s*(?:[-*]\s*)?(模型|model|來源|source|提示詞|prompt|備註|notes?)\s*[:：]\s*(.*)$/iu,
+    );
     if (!match) return null;
-    const names = {模型: "model", model: "model", 來源: "source", source: "source", 提示詞: "prompt", prompt: "prompt", 備註: "notes", note: "notes", notes: "notes"};
-    return { name: names[match[1].toLocaleLowerCase()] || names[match[1]], value: match[2] };
+    const names = {
+      模型: "model",
+      model: "model",
+      來源: "source",
+      source: "source",
+      提示詞: "prompt",
+      prompt: "prompt",
+      備註: "notes",
+      note: "notes",
+      notes: "notes",
+    };
+    return {
+      name: names[match[1].toLocaleLowerCase()] || names[match[1]],
+      value: match[2],
+    };
   };
   const reference = (value) => {
-    let raw = text(value, 400).replace(/^[-*]\s*/u, "").trim();
+    let raw = text(value, 400)
+      .replace(/^[-*]\s*/u, "")
+      .trim();
     raw = raw.replace(/^\[(.+)\]$/u, "$1").trim();
-    const file = raw.match(/(?:^|\s)([^\s]+\.(?:png|jpe?g|webp|gif|mp4|webm|wav|mp3|fbx|glb|gltf))$/iu);
+    const file = raw.match(
+      /(?:^|\s)([^\s]+\.(?:png|jpe?g|webp|gif|mp4|webm|wav|mp3|fbx|glb|gltf))$/iu,
+    );
     if (file) return { key: normalize(file[1]), filename: file[1] };
     const number = raw.match(/^(\d{1,4})(?:[-_ .]+(.+))?$/u);
     if (!number) return null;
     const suffix = text(number[2], 120).replace(/^[-_ .]+/u, "");
-    const model = suffix && !/\b(?:prompt|提示詞|模型|model)\b/iu.test(suffix) ? suffix : "";
+    const model =
+      suffix && !/\b(?:prompt|提示詞|模型|model)\b/iu.test(suffix)
+        ? suffix
+        : "";
     return { key: String(Number(number[1])), model };
   };
   function normalizeEntry(value, fallbackKey = "") {
     if (!value || typeof value !== "object") return null;
-    const data = { ...value, ...(value.fields && typeof value.fields === "object" ? value.fields : {}) },
-      file = data.filename || data.file || data.path || data.name || fallbackKey;
+    const data = {
+        ...value,
+        ...(value.fields && typeof value.fields === "object"
+          ? value.fields
+          : {}),
+      },
+      file =
+        data.filename || data.file || data.path || data.name || fallbackKey;
     const ref = reference(String(file));
     const key = normalize(file) || ref?.key || normalize(fallbackKey);
     if (!key) return null;
@@ -69,11 +97,18 @@
       : Array.isArray(value.files)
         ? value.files.map((item) => ["", item])
         : Object.entries(value);
-    const entries = rows.map(([key, item]) => normalizeEntry(item, key)).filter(Boolean);
-    return { entries, warnings: entries.length ? [] : [`${name}：沒有找到檔案對照資料`] };
+    const entries = rows
+      .map(([key, item]) => normalizeEntry(item, key))
+      .filter(Boolean);
+    return {
+      entries,
+      warnings: entries.length ? [] : [`${name}：沒有找到檔案對照資料`],
+    };
   }
   function parseText(raw, name) {
-    const lines = String(raw || "").replace(/\r\n?/gu, "\n").split("\n");
+    const lines = String(raw || "")
+      .replace(/\r\n?/gu, "\n")
+      .split("\n");
     const entries = [];
     let current = null;
     let mode = "";
@@ -83,7 +118,11 @@
       current.model = text(current.model, 120);
       current.source = text(current.source, 500);
       current.notes = text(current.notes, 2000);
-      if (current.key && (current.model || current.prompt || current.source || current.notes)) entries.push(current);
+      if (
+        current.key &&
+        (current.model || current.prompt || current.source || current.notes)
+      )
+        entries.push(current);
       current = null;
       mode = "";
     };
@@ -91,7 +130,14 @@
       const ref = reference(value);
       if (!ref) return false;
       save();
-      current = { key: ref.key, filename: ref.filename || "", source: "", model: ref.model || "", prompt: "", notes: "" };
+      current = {
+        key: ref.key,
+        filename: ref.filename || "",
+        source: "",
+        model: ref.model || "",
+        prompt: "",
+        notes: "",
+      };
       return true;
     };
     for (const line of lines) {
@@ -100,7 +146,9 @@
       if (heading && start(heading[1] || heading[2])) continue;
       const bracket = trimmed.match(/^\[(.+)\]$/u);
       if (bracket && start(bracket[1])) continue;
-      const explicit = trimmed.match(/^(?:檔名|filename|file|檔案)\s*[:：]\s*(.+)$/iu);
+      const explicit = trimmed.match(
+        /^(?:檔名|filename|file|檔案)\s*[:：]\s*(.+)$/iu,
+      );
       if (explicit && start(explicit[1])) continue;
       const tagged = field(line);
       if (tagged) {
@@ -110,11 +158,15 @@
         continue;
       }
       if (!current) continue;
-      if (mode === "prompt") current.prompt += (current.prompt ? "\n" : "") + line;
-      else if (mode === "notes") current.notes += (current.notes ? "\n" : "") + line;
+      if (mode === "prompt")
+        current.prompt += (current.prompt ? "\n" : "") + line;
+      else if (mode === "notes")
+        current.notes += (current.notes ? "\n" : "") + line;
     }
     save();
-    const warnings = entries.length ? [] : [`${name}：沒有找到可套用的檔案區段`];
+    const warnings = entries.length
+      ? []
+      : [`${name}：沒有找到可套用的檔案區段`];
     return { entries, warnings };
   }
   function parse(raw, name = "metadata") {
@@ -127,11 +179,18 @@
     const path = normalize(item.relativePath || item.filename);
     const file = basename(path);
     const source = normalize(item.source || sourceOf(path));
-    const candidates = [normalize(entry.key), normalize(entry.filename)].filter(Boolean);
-    const exact = candidates.some((key) => key === path || key === file || basename(key) === file);
-    const numeric = candidates.some((key) => key === numberKey(file) || key === numberKey(path));
+    const candidates = [normalize(entry.key), normalize(entry.filename)].filter(
+      Boolean,
+    );
+    const exact = candidates.some(
+      (key) => key === path || key === file || basename(key) === file,
+    );
+    const numeric = candidates.some(
+      (key) => key === numberKey(file) || key === numberKey(path),
+    );
     if (!exact && !numeric) return false;
-    if (entry.source && source && normalize(entry.source) !== source) return false;
+    if (entry.source && source && normalize(entry.source) !== source)
+      return false;
     return true;
   }
   globalThis.GPT2WEBUploadMetadata = { parse, match, sourceOf, numberKey };

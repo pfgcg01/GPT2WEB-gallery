@@ -124,7 +124,16 @@
         picture.append(img);
       } else
         picture.append(
-          el("span", item.mime?.startsWith("video/") ? "▶ 影片" : item.mime?.startsWith("audio/") ? "♫ 音訊" : item.mime?.startsWith("model/") ? "◇ 3D" : "✓"),
+          el(
+            "span",
+            item.mime?.startsWith("video/")
+              ? "▶ 影片"
+              : item.mime?.startsWith("audio/")
+                ? "♫ 音訊"
+                : item.mime?.startsWith("model/")
+                  ? "◇ 3D"
+                  : "✓",
+          ),
         );
       const body = el("div", undefined, "upload-item-body"),
         title = el("h3", item.filename),
@@ -264,17 +273,17 @@
         }
         const inferred = inferredFields(file),
           item = {
-          id: crypto.randomUUID(),
-          libraryId,
-          filename: file.name,
-          relativePath: relativeName(file),
-          file,
-          mime,
-          fields: inferred.fields,
-          custom: inferred.custom,
-          state: "queued",
-          addedAt: Date.now(),
-        };
+            id: crypto.randomUUID(),
+            libraryId,
+            filename: file.name,
+            relativePath: relativeName(file),
+            file,
+            mime,
+            fields: inferred.fields,
+            custom: inferred.custom,
+            state: "queued",
+            addedAt: Date.now(),
+          };
         await store("items", item);
         items.push(item);
         renderItem(item);
@@ -365,7 +374,8 @@
     picker.id = "upload-files";
     picker.type = "file";
     picker.multiple = true;
-    picker.accept = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.wav,.mp3,.fbx,.glb,.gltf,.txt,.md,.json";
+    picker.accept =
+      ".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.wav,.mp3,.fbx,.glb,.gltf,.txt,.md,.json";
     picker.hidden = true;
     chooseButton.onclick = () => {
       if (!running && !adding) picker.click();
@@ -571,7 +581,10 @@
               ...fields,
             };
             let preview;
-            if (item.mime === "image/gif" || item.mime.startsWith("video/")) {
+            if (
+              item.mime.startsWith("image/") ||
+              item.mime.startsWith("video/")
+            ) {
               const poster = await transfer().preview(item.file, item.mime);
               preview = poster.blob;
               Object.assign(metadata, {
@@ -591,7 +604,14 @@
                 hash,
                 bytes: item.file.size,
                 mime: item.mime,
-                kind: item.mime.startsWith("video/") ? "video" : item.mime.startsWith("audio/") ? "audio" : (item.mime.startsWith("model/") || item.filename.toLowerCase().endsWith(".fbx")) ? "model3d" : "image",
+                kind: item.mime.startsWith("video/")
+                  ? "video"
+                  : item.mime.startsWith("audio/")
+                    ? "audio"
+                    : item.mime.startsWith("model/") ||
+                        item.filename.toLowerCase().endsWith(".fbx")
+                      ? "model3d"
+                      : "image",
                 metadata,
               },
             });
@@ -631,6 +651,8 @@
             file: null,
             preview: null,
             upload: null,
+            directState: null,
+            directReceipt: null,
             error: "",
           });
           URL.revokeObjectURL(urls.get(item.id));

@@ -70,8 +70,14 @@
       });
       width = video ? media.videoWidth : media.naturalWidth;
       height = video ? media.videoHeight : media.naturalHeight;
-      if (!width || !height || width * height > 16000000)
-        throw Error("媒體尺寸超過 1,600 萬像素。");
+      if (
+        !width ||
+        !height ||
+        width > 32768 ||
+        height > 32768 ||
+        width * height > 80000000
+      )
+        throw Error("媒體尺寸超過本機預覽上限（8,000 萬像素）。");
       decoded = true;
     } catch (error) {
       URL.revokeObjectURL(url);
@@ -150,11 +156,48 @@
       throw Object.assign(Error("待傳原檔指紋不符，請重新選擇。"), {
         status: 422,
       });
-    const ready = await api("/api/uploads/prepare", spec);
+    const direct = globalThis.GPT2WEBGithubDirect;
+    let poster;
+    if (direct && ["image", "video"].includes(spec.kind)) {
+      if (item.preview && spec.metadata.mediaWidth && spec.metadata.mediaHeight)
+        poster = {
+          blob: item.preview,
+          width: spec.metadata.mediaWidth,
+          height: spec.metadata.mediaHeight,
+        };
+      else poster = await preview(item.file, spec.mime);
+    }
+    const description = direct
+      ? await direct.describe(item.file, poster)
+      : undefined;
+    const ready = await api("/api/uploads/prepare", {
+      ...spec,
+      ...(description ? { direct: description } : {}),
+    });
     if (ready.complete) {
       if (ready.hash !== spec.hash) throw Error("上傳收據指紋不符。");
       return;
     }
+    if (ready.mode === "github-direct") {
+      if (!direct || ready.hash !== spec.hash)
+        throw Error("請更新網站以使用 GitHub 直接上傳。");
+      const receipt = await direct.send(ready, item.file, poster, {
+        save,
+        state: item.directState,
+        progress,
+      });
+      const done = await api("/api/uploads/complete", {
+        id: spec.id,
+        directReceipt: receipt,
+      });
+      if (!done.ok || done.hash !== spec.hash)
+        throw Error("GitHub 上傳尚未確認，原檔已保留。");
+      return;
+    }
+    if (globalThis.GPT2WEBGalleryConfig?.directRequired)
+      throw Error(
+        "GitHub 直接上傳尚未就緒；原檔保留，不會傳到 Supabase Storage。",
+      );
     if (!ready.uploaded) {
       if (
         !allowed(ready.tusEndpoint, ready.storageOrigin) ||

@@ -65,7 +65,7 @@
         u.pathname.startsWith("/storage/v1/object/sign/gpt2web-private/");
       const github =
         u.origin === "https://raw.githubusercontent.com" &&
-        /^\/Novel-1234\/GEN-IMG\/[a-f0-9]{40}\/(?:originals|thumbs)\/[a-f0-9]{2}\/[a-f0-9]{64}\.(?:png|jpg|webp|gif|mp4|webm)$/u.test(
+        /^\/Novel-1234\/GEN-IMG\/[a-f0-9]{40}\/(?:originals|thumbs)\/[a-f0-9]{2}\/[a-f0-9]{64}\.(?:png|jpg|webp|gif|mp4|webm|wav|mp3|glb|gltf|fbx|bin)$/u.test(
           u.pathname,
         ) &&
         !u.search &&
