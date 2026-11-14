@@ -39,12 +39,10 @@
     section.setAttribute("aria-label", "主題分類");
     const heading = el("div", undefined, "subject-heading"),
       copy = el("div");
-    copy.append(
-      el("p", "依主題整理", "eyebrow"),
-      el("h2", "先選一個主題，再慢慢挑。"),
-    );
+    copy.append(el("h2", "主題分類"));
     const manage = el("button", "管理分類", "secondary");
     manage.id = "manage-categories";
+    manage.title = "新增、更名或移除分類";
     manage.onclick = () => {
       $("category-manage").showModal();
       renderManage(true);
@@ -68,27 +66,22 @@
       ui().filterChanged();
     };
     label.append(check, document.createTextNode("只看尚未確認的預分類"));
-    hint.append(label, el("span", "預分類可隨時調整；收藏和封存分開保留。"));
-    section.append(heading, nav, sub, hint);
-    document.querySelector(".workspace-header").after(section);
+    hint.append(label);
+    section.append(heading, nav, sub);
+    $("category-navigation").append(section);
+    $("filter-extra").append(hint);
+    const toggle = $("browse-topics");
+    toggle.hidden = false;
+    toggle.onclick = () => {
+      const open = document
+        .querySelector(".sidebar")
+        .classList.toggle("is-browsing");
+      toggle.setAttribute("aria-expanded", String(open));
+    };
     const bulk = el("button", "調整分類");
     bulk.id = "bulk-categorize";
     bulk.onclick = () => openPicker(ui().getSelection());
     document.querySelector(".bulk-actions").prepend(bulk);
-    const filters = [
-      ...document.querySelectorAll(
-        ".workspace > .filters:not([data-media-filter])",
-      ),
-    ];
-    if (filters.length) {
-      const details = el("details", undefined, "source-filters");
-      details.append(el("summary", "來源與進階篩選（批次、輪次、裝置）"));
-      filters[0].before(details);
-      for (const f of filters) details.append(f);
-      const search = $("search").closest("label");
-      details.before(search);
-      search.classList.add("subject-search");
-    }
     const picker = el("dialog", undefined, "category-dialog");
     picker.id = "category-picker";
     picker.setAttribute("aria-labelledby", "category-picker-title");
@@ -259,6 +252,11 @@
     $("category-picker").showModal();
   }
   const addon = {
+    reset(field) {
+      if (!field || field === "category") chosen = "";
+      if (!field || field === "categorySource") onlySuggested = false;
+      if ($("only-suggested")) $("only-suggested").checked = onlySuggested;
+    },
     query(params) {
       if (chosen) params.set("category", chosen);
       if (onlySuggested) params.set("categorySource", "suggested");
@@ -307,7 +305,9 @@
       ]);
       if (signature !== lastCategories) {
         lastCategories = signature;
-        const nav = $("subject-tabs");
+        const nav = $("subject-tabs"),
+          sub = $("subject-subtabs");
+        sub.remove();
         nav.replaceChildren();
         for (const c of [
           { id: "", name: "全部主題", count: catalog.total },
@@ -327,8 +327,7 @@
           b.onclick = () => choose(c.id);
           nav.append(b);
         }
-        const parent = find(chosen)?.parent_id || chosen,
-          sub = $("subject-subtabs");
+        const parent = find(chosen)?.parent_id || chosen;
         sub.replaceChildren();
         const list = children(parent);
         if (list.length) {
@@ -349,27 +348,17 @@
           }
         }
         sub.hidden = !list.length;
+        const parentButton = [...nav.children].find(
+          (b) => b.dataset.category === parent,
+        );
+        if (parentButton && list.length) parentButton.after(sub);
+        else $("subject-browser").append(sub);
         renderManage();
       }
       for (const b of document.querySelectorAll(
         ".category-button,#bulk-categorize,#save-category,#category-manage button[type=submit],#delete-category",
       ))
         b.disabled = busy;
-      const current = find(chosen);
-      if (current) {
-        $("view-title").textContent = path(chosen);
-        $("view-description").textContent =
-          "在這個主題中查看" +
-          ({
-            pending: "待篩選",
-            favorite: "喜歡的",
-            archived: "已封存",
-            all: "所有",
-          }[
-            document.querySelector("#views [aria-current=page]")?.dataset.view
-          ] || "所有") +
-          "圖片。";
-      }
       $("only-suggested").checked = onlySuggested;
     },
   };
