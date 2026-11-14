@@ -6,7 +6,10 @@
       model: ["模型", 120],
       notes: ["備註", 2000],
     },
-    MAX = 50 * 1024 * 1024,
+    MAX =
+      (globalThis.GPT2WEBGalleryConfig?.directRequired === false ? 50 : 90) *
+      1024 *
+      1024,
     LIMIT = 512 * 1024 * 1024;
   const ui = () => globalThis.GPT2WEBGalleryUI,
     transfer = () => globalThis.GPT2WEBUploadTransfer;
@@ -294,7 +297,9 @@
           continue;
         }
         if (!file.size || file.size > MAX) {
-          problems.push(file.name + "：單檔需為 1 byte–50 MiB");
+          problems.push(
+            file.name + `：單檔需為 1 byte–${MAX / 1024 / 1024} MiB`,
+          );
           continue;
         }
         if (
@@ -458,7 +463,7 @@
       picker,
       el(
         "p",
-        "可同時選取編號媒體與 metadata.txt／紀錄.md／JSON；TXT 會依檔名或編號套用模型與 Prompt。也可將檔案拖曳到這裡。媒體支援 PNG、JPG、WebP、GIF、MP4、WebM、WAV、MP3、FBX、GLB、GLTF；單檔最多 50 MiB。",
+        `可同時選取編號媒體與 metadata.txt／紀錄.md／JSON；TXT 會依檔名或編號套用模型與 Prompt。也可將檔案拖曳到這裡。媒體支援 PNG、JPG、WebP、GIF、MP4、WebM、WAV、MP3、FBX、GLB、GLTF；單檔最多 ${MAX / 1024 / 1024} MiB。`,
       ),
     );
     const metadataButton = el(
