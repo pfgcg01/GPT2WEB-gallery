@@ -2152,7 +2152,7 @@ dialog::backdrop {
 .sidebar {
   padding: 24px 16px 16px;
   height: 100dvh;
-  gap: 22px;
+  gap: 16px;
 }
 .sidebar-brand-row {
   display: flex;
@@ -2261,8 +2261,9 @@ dialog::backdrop {
   white-space: normal;
 }
 .sidebar-shortcuts {
-  margin-top: 22px;
-  padding-top: 14px;
+  flex-shrink: 0;
+  margin-top: 0;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 .sidebar-shortcuts:empty {
