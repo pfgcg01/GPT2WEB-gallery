@@ -5,6 +5,7 @@
     "image/jpeg": "jpg",
     "image/webp": "webp",
     "image/gif": "gif",
+    "image/svg+xml": "svg",
     "video/mp4": "mp4",
     "video/webm": "webm",
     "audio/wav": "wav",
@@ -100,6 +101,45 @@
     }
   }
   async function preview(file, mime) {
+    if (mime === "image/svg+xml") {
+      if (file.size > 8 * 1024 * 1024) throw Error("SVG 預覽上限8 MiB。");
+      const source = await file.text();
+      const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+      if (
+        parsed.querySelector("parsererror") ||
+        parsed.documentElement.localName !== "svg" ||
+        /<!DOCTYPE|<!ENTITY/iu.test(source)
+      )
+        throw Error("SVG 結構不正確。");
+      for (const node of parsed.querySelectorAll("*")) {
+        if (
+          [
+            "script",
+            "foreignobject",
+            "iframe",
+            "object",
+            "embed",
+            "link",
+          ].includes(node.localName.toLowerCase())
+        )
+          throw Error("SVG 含不支援的主動內容或樣式。");
+        if (
+          node.localName.toLowerCase() === "style" &&
+          /@import|url\(\s*["']?(?!#)|expression\(/iu.test(node.textContent)
+        )
+          throw Error("SVG 樣式含外部資源。");
+        for (const a of node.attributes) {
+          if (
+            /^on/iu.test(a.name) ||
+            (["href", "src"].includes(a.localName) &&
+              a.value &&
+              !a.value.startsWith("#")) ||
+            /@import|url\(\s*["']?(?!#)/iu.test(a.value)
+          )
+            throw Error("SVG 含不支援的外部資源。");
+        }
+      }
+    }
     const url = URL.createObjectURL(file),
       video = mime.startsWith("video/"),
       media = document.createElement(video ? "video" : "img");
